@@ -34,12 +34,7 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
   }
 
   def put(rate: Rate): F[Unit] = {
-    Sync[F].delay {
-      val apiTimestamp = rate.timestamp.value.toInstant
-      val expiresAt = apiTimestamp.plusSeconds(ttl.toSeconds)
-      cache.put(rate.pair, CachedRate(rate, expiresAt))
-      ()
-    }
+    putBatch(List(rate))
   }
 
   def clear(): F[Unit] = Sync[F].delay(cache.clear())
