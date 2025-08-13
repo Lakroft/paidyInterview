@@ -1,17 +1,18 @@
 package forex
 
-import cats.effect.{ Concurrent, Timer }
+import cats.effect.{Clock, ConcurrentEffect, Timer}
 import forex.config.ApplicationConfig
 import forex.http.rates.RatesHttpRoutes
 import forex.services._
 import forex.programs._
 import org.http4s._
 import org.http4s.implicits._
-import org.http4s.server.middleware.{ AutoSlash, Timeout }
+import org.http4s.server.middleware.{AutoSlash, Timeout}
+import scala.concurrent.ExecutionContext
 
-class Module[F[_]: Concurrent: Timer](config: ApplicationConfig) {
+class Module[F[_]: Timer: ConcurrentEffect: Clock](config: ApplicationConfig)(implicit ec: ExecutionContext) {
 
-  private val ratesService: RatesService[F] = RatesServices.dummy[F]
+  private val ratesService: RatesService[F] = RatesServices.cachedOneFrame[F]
 
   private val ratesProgram: RatesProgram[F] = RatesProgram[F](ratesService)
 

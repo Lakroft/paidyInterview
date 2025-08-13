@@ -13,9 +13,10 @@ object Main extends IOApp {
 
 }
 
-class Application[F[_]: ConcurrentEffect: Timer] {
+class Application[F[_]: ConcurrentEffect: Timer: Clock] {
 
-  def stream(ec: ExecutionContext): Stream[F, Unit] =
+  def stream(ec: ExecutionContext): Stream[F, Unit] = {
+    implicit val implicitEc: ExecutionContext = ec
     for {
       config <- Config.stream("app")
       module = new Module[F](config)
@@ -24,5 +25,6 @@ class Application[F[_]: ConcurrentEffect: Timer] {
             .withHttpApp(module.httpApp)
             .serve
     } yield ()
+  }
 
 }
