@@ -5,6 +5,7 @@ import cats.implicits.{toShow}
 import cats.syntax.either._
 import cats.syntax.flatMap._
 import cats.syntax.functor._
+import forex.config.{CacheConfig, OneFrameConfig}
 import forex.domain.Rate
 import forex.services.rates.errors.Error.OneFrameLookupFailed
 import forex.services.rates.{Algebra, RateCache}
@@ -66,9 +67,12 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
 }
 
 object CachedOneFrame {
-  def apply[F[_]: ConcurrentEffect: Clock](implicit ec: ExecutionContext): CachedOneFrame[F] = {
-    val client = new OneFrameClient[F]()
-    val cache = new RateCache[F]()
+  def apply[F[_]: ConcurrentEffect: Clock](
+      oneFrameConfig: OneFrameConfig, 
+      cacheConfig: CacheConfig
+  )(implicit ec: ExecutionContext): CachedOneFrame[F] = {
+    val client = new OneFrameClient[F](oneFrameConfig)
+    val cache = new RateCache[F](cacheConfig)
     new CachedOneFrame[F](client, cache)
   }
 }

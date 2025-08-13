@@ -2,21 +2,21 @@ package forex.services.rates
 
 import cats.effect.{Clock, Sync}
 import cats.syntax.functor._
+import forex.config.CacheConfig
 import forex.domain.Rate
 
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
-import scala.concurrent.duration._
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import scala.jdk.CollectionConverters._
 
 case class CachedRate(rate: Rate, expiresAt: Instant)
 
-class RateCache[F[_]: Sync: Clock] {
+class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
   
   private val cache = new ConcurrentHashMap[Rate.Pair, CachedRate]()
   private val trackedPairs = ConcurrentHashMap.newKeySet[Rate.Pair]()
-  private val ttl = 5.minutes
+  private val ttl = config.ttl
 
   def get(pair: Rate.Pair): F[Option[Rate]] = {
     trackedPairs.add(pair)
