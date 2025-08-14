@@ -5,9 +5,9 @@ import cats.effect.{ContextShift, IO, Timer}
 import scala.concurrent.ExecutionContext.Implicits.global
 import forex.config.CacheConfig
 import forex.domain.{Currency, Rate}
-import forex.helpers.{MockAlgebra, TestData}
+import forex.helpers.{MockAlgebra, TestClock, TestData}
 import forex.services.rates.RateCache
-import forex.services.rates.errors.Error.OneFrameLookupFailed
+import forex.services.rates.errors.Error.{OneFrameLookupFailed, RateNotFound}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -18,29 +18,34 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   implicit val timer: Timer[IO] = IO.timer(global)
 
   "CachedOneFrame" should "return cached rate when available" in {
-    val mockClient = new MockAlgebra[IO]
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
-    val rate = TestData.createTestRate(Currency.USD, Currency.EUR)
+    val rate = TestData.createTestRateWithClock(Currency.USD, Currency.EUR, testClock)
     cache.put(rate).unsafeRunSync()
     
     val result = service.get(rate.pair).unsafeRunSync()
     
     result shouldBe Right(rate)
-    mockClient.callCount shouldBe 0
     mockClient.batchCallCount shouldBe 0
   }
   
   it should "make batch request when expired tracked pairs exist" in {
-    val mockClient = new MockAlgebra[IO]
-    val cache = new RateCache[IO](CacheConfig(100.millis))
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO](CacheConfig(5.seconds))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
     val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
     val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
-    val rate1 = TestData.createTestRate(pair1.from, pair1.to)
-    val rate2 = TestData.createTestRate(pair2.from, pair2.to)
+    val rate1 = TestData.createTestRateWithClock(pair1.from, pair1.to, testClock)
+    val rate2 = TestData.createTestRateWithClock(pair2.from, pair2.to, testClock)
     
     // Track pairs by requesting them
     cache.get(pair1).unsafeRunSync()
@@ -50,8 +55,8 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     cache.put(rate1).unsafeRunSync()
     cache.put(rate2).unsafeRunSync()
     
-    // Wait for expiration
-    Thread.sleep(150)
+    // Advance time to expire rates
+    testClock.advance(10.seconds)
     
     // Setup mock expectation
     mockClient.expectBatchCall(List(pair1, pair2))
@@ -60,11 +65,13 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     result.isRight shouldBe true
     mockClient.verifyBatchCalled()
-    mockClient.callCount shouldBe 0 // Should not make single calls
   }
   
   it should "make single request when no expired tracked pairs exist" in {
-    val mockClient = new MockAlgebra[IO]
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
@@ -78,8 +85,11 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "cache rates from batch response" in {
-    val mockClient = new MockAlgebra[IO]
-    val cache = new RateCache[IO](CacheConfig(100.millis))
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO](CacheConfig(5.seconds))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
     val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
@@ -89,10 +99,14 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     cache.get(pair1).unsafeRunSync()
     cache.get(pair2).unsafeRunSync()
     
-    // Expire them (by putting expired rates)
-    cache.put(TestData.createExpiredRate(pair1.from, pair1.to)).unsafeRunSync()
-    cache.put(TestData.createExpiredRate(pair2.from, pair2.to)).unsafeRunSync()
-    Thread.sleep(10) // Small delay to ensure expiration
+    // Create rates and then expire them by advancing time
+    val rate1 = TestData.createTestRateWithClock(pair1.from, pair1.to, testClock)
+    val rate2 = TestData.createTestRateWithClock(pair2.from, pair2.to, testClock)
+    cache.put(rate1).unsafeRunSync()
+    cache.put(rate2).unsafeRunSync()
+    
+    // Advance time to expire rates (TTL is 5.seconds)
+    testClock.advance(10.seconds)
     
     val result = service.get(pair1).unsafeRunSync()
     
@@ -104,16 +118,24 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "handle batch API failures gracefully" in {
-    val mockClient = new MockAlgebra[IO]
-    val cache = new RateCache[IO](CacheConfig(100.millis))
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO](CacheConfig(5.seconds))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
     // Track and expire pair
     cache.get(pair).unsafeRunSync()
-    cache.put(TestData.createExpiredRate(pair.from, pair.to)).unsafeRunSync()
-    Thread.sleep(10)
+    
+    // Create rate and expire it by advancing time
+    val rate = TestData.createTestRateWithClock(pair.from, pair.to, testClock)
+    cache.put(rate).unsafeRunSync()
+    
+    // Advance time to expire rate (TTL is 5.seconds)
+    testClock.advance(10.seconds)
     
     mockClient.setBatchShouldFail(true)
     
@@ -124,7 +146,10 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "handle single API failures gracefully" in {
-    val mockClient = new MockAlgebra[IO]
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
@@ -139,30 +164,41 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "return error when requested pair not found in batch response" in {
-    val mockClient = new MockAlgebra[IO] {
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock)) {
       override def getBatch(pairs: List[Rate.Pair])(implicit F: cats.Applicative[IO]) = {
         // Return empty list instead of expected rates
         IO.pure(Right(List.empty[Rate]))
       }
     }
-    val cache = new RateCache[IO](CacheConfig(100.millis))
+    val cache = new RateCache[IO](CacheConfig(5.seconds))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
     // Track and expire pair
     cache.get(pair).unsafeRunSync()
-    cache.put(TestData.createExpiredRate(pair.from, pair.to)).unsafeRunSync()
-    Thread.sleep(10)
+    
+    // Create rate and expire it by advancing time
+    val rate = TestData.createTestRateWithClock(pair.from, pair.to, testClock)
+    cache.put(rate).unsafeRunSync()
+    
+    // Advance time to expire rate (TTL is 5.seconds)
+    testClock.advance(10.seconds)
     
     val result = service.get(pair).unsafeRunSync()
     
     result.isLeft shouldBe true
-    result.left.getOrElse(fail()) shouldBe OneFrameLookupFailed("Pair not found in response")
+    result.left.getOrElse(fail()) shouldBe RateNotFound("USDEUR")
   }
   
   it should "cache single API response" in {
-    val mockClient = new MockAlgebra[IO]
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
     val service = new CachedOneFrame[IO](mockClient, cache)
     

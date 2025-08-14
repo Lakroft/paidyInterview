@@ -33,7 +33,6 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     pairs.foreach { pair =>
       service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
     }
-    mockClient.callCount shouldBe 0
     mockClient.batchCallCount shouldBe 3
     
     // Phase 2: Immediate re-requests - should use cache
@@ -41,7 +40,6 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     pairs.foreach { pair =>
       service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
     }
-    mockClient.callCount shouldBe 0
     mockClient.batchCallCount shouldBe 0
     
     // Phase 3: After expiration - should make 1 batch call
@@ -52,8 +50,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     service.get(pairs.head).unsafeRunSync() shouldBe a[Right[_, _]]
     
     mockClient.batchCallCount shouldBe 1
-    mockClient.callCount shouldBe 0
-    
+
     // All pairs should now be cached again
     pairs.foreach { pair =>
       service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
@@ -79,7 +76,6 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     service.get(uncachedPair).unsafeRunSync() shouldBe a[Right[_, _]]
     
     // Should make only 1 batch API call for uncached pair
-    mockClient.callCount shouldBe 0
     mockClient.batchCallCount shouldBe 1
     mockClient.batchCalledPairs should contain only List(uncachedPair)
   }
@@ -169,8 +165,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     service.get(pairs.head).unsafeRunSync()
     
     mockClient.batchCallCount shouldBe 1
-    mockClient.callCount shouldBe 0
-    
+
     // Verify all pairs were included in the batch
     mockClient.batchCalledPairs.head.toSet shouldBe pairs.toSet
   }

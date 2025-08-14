@@ -6,7 +6,7 @@ import cats.syntax.either._
 import cats.syntax.flatMap._
 import forex.config.{CacheConfig, OneFrameConfig}
 import forex.domain.Rate
-import forex.services.rates.errors.Error.OneFrameLookupFailed
+import forex.services.rates.errors.Error.{RateNotFound}
 import forex.services.rates.{Algebra, RateCache}
 import forex.services.rates.errors._
 import org.slf4j.LoggerFactory
@@ -39,8 +39,9 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
                   case Some(rate) => 
                     ConcurrentEffect[F].pure(rate.asRight[Error])
                   case None => 
-                    logger.warn(s"Requested pair ${pair.from.show}${pair.to.show} not found in batch response")
-                    ConcurrentEffect[F].pure(OneFrameLookupFailed("Pair not found in response").asLeft[Rate])
+                    val pairStr = s"${pair.from.show}${pair.to.show}"
+                    logger.warn(s"Requested pair $pairStr not found in batch response")
+                    ConcurrentEffect[F].pure(RateNotFound(pairStr).asLeft[Rate])
                 }
               }
             case Left(error) =>

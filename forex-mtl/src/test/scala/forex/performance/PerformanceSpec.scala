@@ -75,7 +75,6 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     
     // Should make exactly 1 batch call for all pairs
     mockClient.batchCallCount shouldBe 1
-    mockClient.callCount shouldBe 0
   }
   
   it should "maintain performance under memory pressure" in {

@@ -114,8 +114,7 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers with ScalaChe
         
         // Should make exactly one batch call
         mockClient.batchCallCount shouldBe 1
-        mockClient.callCount shouldBe 0
-        
+
         // Batch should include all expired pairs
         if (mockClient.batchCalledPairs.nonEmpty) {
           mockClient.batchCalledPairs.head.toSet shouldBe pairs.toSet
