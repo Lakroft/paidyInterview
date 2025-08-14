@@ -70,7 +70,7 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers with ScalaChe
   
   it should "cache all successfully retrieved rates" in {
     forAll(ratePairsGen) { pairs =>
-      whenever(pairs.nonEmpty && pairs.length <= 5) { // Limit to avoid long test times
+      whenever(pairs.nonEmpty) {
         val mockClient = new MockAlgebra[IO]
         val cache = new RateCache[IO](CacheConfig(5.minutes))
         val service = new CachedOneFrame[IO](mockClient, cache)

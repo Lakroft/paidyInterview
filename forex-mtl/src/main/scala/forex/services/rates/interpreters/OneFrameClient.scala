@@ -44,7 +44,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
       val uriString = s"${config.url}/rates?$queryString"
       val uri = Uri.unsafeFromString(uriString)
       
-      logInfo(s"Making batch HTTP request for pairs: [${pairsStr}]").flatMap { _ =>
+      logInfo(s"Making batch HTTP request for pairs: [$pairsStr]").flatMap { _ =>
           BlazeClientBuilder[F](ec).resource.use { client =>
             val request = Request[F](
               method = Method.GET,

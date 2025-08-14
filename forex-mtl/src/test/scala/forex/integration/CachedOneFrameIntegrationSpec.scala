@@ -17,7 +17,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
   implicit val timer: Timer[IO] = IO.timer(global)
 
-  "CachedOneFrame Integration" should "optimize API calls with intelligent batching" in {
+  "CachedOneFrame Integration" should "optimize API calls with batching" in {
     val testClock = TestClock[IO]
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(2.seconds))(implicitly, testClock)

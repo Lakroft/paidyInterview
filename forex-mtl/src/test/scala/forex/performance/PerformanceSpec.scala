@@ -38,8 +38,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     duration should be < 1000L
     
     // Should make only 1 API call despite 1000 requests
-    mockClient.callCount shouldBe 1
-    mockClient.batchCallCount shouldBe 0
+    mockClient.batchCallCount shouldBe 1
   }
   
   it should "efficiently batch requests for multiple pairs" in {
@@ -104,7 +103,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     duration should be < 2000L
     
     // First round should make API calls, second round should be cached
-    mockClient.callCount shouldBe pairs.length
+    mockClient.batchCallCount shouldBe pairs.length
     
     // Verify tracked pairs are managed efficiently
     cache.getTrackedPairs.unsafeRunSync().length shouldBe pairs.length

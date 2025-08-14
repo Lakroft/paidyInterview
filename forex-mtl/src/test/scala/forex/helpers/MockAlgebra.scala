@@ -66,7 +66,7 @@ class MockAlgebra[F[_]: Sync](testClock: Option[TestClock[F]] = None) extends Al
     _batchCalledPairs += pairs
     
     _expectedBatchPairs.foreach { expected =>
-      assert(pairs.toSet == expected.toSet, s"Expected batch call with ${expected}, but got ${pairs}")
+      assert(pairs.toSet == expected.toSet, s"Expected batch call with $expected, but got $pairs")
     }
     
     if (_batchShouldFail) {
@@ -91,6 +91,6 @@ class MockAlgebra[F[_]: Sync](testClock: Option[TestClock[F]] = None) extends Al
   }
   
   def verifySingleCallCount(expected: Int): Unit = {
-    assert(_callCount == expected, s"Expected ${expected} single calls but got ${_callCount}")
+    assert(_callCount == expected, s"Expected $expected single calls but got ${_callCount}")
   }
 }

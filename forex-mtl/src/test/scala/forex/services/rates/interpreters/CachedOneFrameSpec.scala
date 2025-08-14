@@ -73,9 +73,8 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     val result = service.get(pair).unsafeRunSync()
     
     result.isRight shouldBe true
-    mockClient.callCount shouldBe 1
-    mockClient.batchCallCount shouldBe 0
-    mockClient.calledPairs should contain(pair)
+    mockClient.batchCallCount shouldBe 1
+    mockClient.batchCalledPairs.flatten should contain(pair)
   }
   
   it should "cache rates from batch response" in {
@@ -131,7 +130,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
-    mockClient.setShouldFail(true)
+    mockClient.setBatchShouldFail(true)
     
     val result = service.get(pair).unsafeRunSync()
     
@@ -178,6 +177,6 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     cachedResult.isRight shouldBe true
     
     // Should have made only one API call
-    mockClient.callCount shouldBe 1
+    mockClient.batchCallCount shouldBe 1
   }
 }
