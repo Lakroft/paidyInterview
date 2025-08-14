@@ -6,7 +6,7 @@ import cats.syntax.either._
 import cats.syntax.functor._
 import forex.domain.{Currency, Price, Rate, Timestamp}
 import forex.services.rates.Algebra
-import forex.services.rates.errors.Error.{AuthenticationError, InvalidResponse, NetworkError, RateNotFound, ServiceUnavailable}
+import forex.services.rates.errors.Error.{AuthenticationError, InvalidResponse, NetworkError, RateNotFound, RateLimitExceeded, ServiceUnavailable}
 import forex.services.rates.errors._
 import io.circe.generic.auto._
 import org.http4s.circe.CirceEntityDecoder._
@@ -63,7 +63,14 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
                 Timestamp(OffsetDateTime.parse(response.time_stamp))
               )
             }
-            logger.debug(s"Batch request successful: received ${rates.length} rates")
+            if (responses.isEmpty) {
+              logger.warn(s"Empty response from One-Frame for pairs [$pairsStr] - possibly same currency pairs or unsupported pairs")
+            } else if (responses.length < pairs.length) {
+              val returnedPairs = rates.map(r => s"${r.pair.from.show}${r.pair.to.show}").mkString(", ")
+              logger.warn(s"Partial response from One-Frame: requested ${pairs.length} pairs [$pairsStr], received ${responses.length} rates [$returnedPairs]")
+            } else {
+              logger.debug(s"Batch request successful: received ${rates.length} rates")
+            }
             rates.asRight[Error]
           }.handleError { ex =>
 
@@ -85,6 +92,9 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
               case _ if errorMessage.contains("Invalid Currency Pair") =>
                 logger.error(s"Invalid currency pair for pairs [$pairsStr]: $errorMessage")
                 (RateNotFound(pairsStr): Error).asLeft[List[Rate]]
+              case _ if errorMessage.contains("Quota reached") =>
+                logger.error(s"Rate limit exceeded for pairs [$pairsStr]: $errorMessage")
+                (RateLimitExceeded("Daily quota exceeded"): Error).asLeft[List[Rate]]
               case _ if errorMessage.contains("404") =>
                 logger.error(s"Endpoint not found for pairs [$pairsStr]: $errorMessage")
                 (ServiceUnavailable("OneFrame service endpoint not found"): Error).asLeft[List[Rate]]
