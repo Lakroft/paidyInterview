@@ -1,9 +1,11 @@
 package forex.services.rates
 
 import cats.effect.{Clock, Sync}
+import cats.implicits.toShow
 import cats.syntax.functor._
 import forex.config.CacheConfig
 import forex.domain.Rate
+import org.slf4j.LoggerFactory
 
 import java.time.Instant
 import java.util.concurrent.ConcurrentHashMap
@@ -17,6 +19,7 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
   private val cache = new ConcurrentHashMap[Rate.Pair, CachedRate]()
   private val trackedPairs = ConcurrentHashMap.newKeySet[Rate.Pair]()
   private val ttl = config.ttl
+  private val logger = LoggerFactory.getLogger(classOf[RateCache[F]])
 
   def get(pair: Rate.Pair): F[Option[Rate]] = {
     trackedPairs.add(pair)
@@ -24,8 +27,10 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
     Clock[F].realTime(MILLISECONDS).map { nowMillis =>
       Option(cache.get(pair)).flatMap { cachedRate =>
         if (cachedRate.expiresAt.isAfter(Instant.ofEpochMilli(nowMillis))) {
+          logger.info(s"Cache HIT for ${pair.from.show}${pair.to.show}")
           Some(cachedRate.rate)
         } else {
+          logger.info(s"Cache OUTDATED for ${pair.from.show}${pair.to.show}. Now: ${Instant.ofEpochMilli(nowMillis)}, expires at: ${cachedRate.expiresAt}")
           cache.remove(pair)
           None
         }
