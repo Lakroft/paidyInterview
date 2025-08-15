@@ -35,6 +35,20 @@ class RatesHttpRoutes[F[_]: Sync](rates: RatesProgram[F]) extends Http4sDsl[F] {
               InternalServerError(errorResponse)
           }
       }
+    case req @ GET -> Root if req.uri.query.nonEmpty =>
+      val errorResponse = ErrorApiResponse(
+        error = "INVALID_PARAMETERS",
+        message = "Invalid currency parameters. Supported currencies: AUD, CAD, CHF, EUR, GBP, NZD, JPY, SGD, USD",
+        timestamp = Instant.now().toString
+      )
+      BadRequest(errorResponse)
+    case GET -> Root =>
+      val errorResponse = ErrorApiResponse(
+        error = "MISSING_PARAMETERS",
+        message = "Missing required parameters: 'from' and 'to'",
+        timestamp = Instant.now().toString
+      )
+      BadRequest(errorResponse)
   }
 
   val routes: HttpRoutes[F] = Router(

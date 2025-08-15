@@ -5,12 +5,6 @@ services:
     image: paidyinc/one-frame
     ports:
       - "8086:8080"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/rates?pair=USDJPY"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
     restart: unless-stopped
 
   forex-mtl:
@@ -25,10 +19,4 @@ services:
       - CACHE_TTL=5m
     depends_on:
       - one-frame
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/rates?from=USD&to=EUR"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 60s
     restart: unless-stopped

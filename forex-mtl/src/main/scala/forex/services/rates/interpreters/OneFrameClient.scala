@@ -56,9 +56,12 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
           )
 
           client.expect[List[OneFrameResponse]](request).map { responses =>
-            val rates = responses.map { response =>
-              Rate(
-                Rate.Pair(Currency.fromString(response.from), Currency.fromString(response.to)),
+            val rates = responses.flatMap { response =>
+              for {
+                fromCurrency <- Currency.fromString(response.from)
+                toCurrency <- Currency.fromString(response.to)
+              } yield Rate(
+                Rate.Pair(fromCurrency, toCurrency),
                 Price(response.price),
                 Timestamp(OffsetDateTime.parse(response.time_stamp))
               )
