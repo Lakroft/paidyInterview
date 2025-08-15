@@ -48,7 +48,7 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
       case None =>
         logger.debug(s"Cache MISS for ${pair.from.show}${pair.to.show}")
         cache.getExpiredTrackedPairs.flatMap { expiredPairs =>
-          val pairsToFetch = (expiredPairs :+ pair).distinct // here could be duplication but this way we can see how it's working
+          val pairsToFetch = (expiredPairs :+ pair).distinct
           val pairsStr = pairsToFetch.map(p => s"${p.from.show}${p.to.show}").mkString(", ")
           logger.info(s"Batch request for pairs: [$pairsStr]")
           

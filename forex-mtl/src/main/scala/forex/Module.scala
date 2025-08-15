@@ -7,7 +7,7 @@ import forex.services._
 import forex.programs._
 import org.http4s._
 import org.http4s.implicits._
-import org.http4s.server.middleware.{AutoSlash, Timeout}
+import org.http4s.server.middleware.{AutoSlash, Logger, Timeout}
 import scala.concurrent.ExecutionContext
 
 class Module[F[_]: Timer: ConcurrentEffect: Clock](config: ApplicationConfig)(implicit ec: ExecutionContext) {
@@ -28,7 +28,7 @@ class Module[F[_]: Timer: ConcurrentEffect: Clock](config: ApplicationConfig)(im
   }
 
   private val appMiddleware: TotalMiddleware = { http: HttpApp[F] =>
-    Timeout(config.http.timeout)(http)
+    Logger.httpApp(logHeaders = true, logBody = false)(Timeout(config.http.timeout)(http))
   }
 
   private val http: HttpRoutes[F] = ratesHttpRoutes
