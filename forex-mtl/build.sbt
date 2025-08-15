@@ -69,3 +69,20 @@ libraryDependencies ++= Seq(
   Libraries.catsScalaCheck     % Test,
   Libraries.scalaTestPlusCheck % Test
 )
+
+// Assembly settings
+assembly / assemblyJarName := "forex-mtl.jar"
+assembly / mainClass := Some("forex.Main")
+
+// Merge strategy for conflicting files
+assembly / assemblyMergeStrategy := {
+  case "module-info.class" => MergeStrategy.discard
+  case x if x.endsWith("/module-info.class") => MergeStrategy.discard
+  case PathList("META-INF", xs @ _*) =>
+    xs match {
+      case ("MANIFEST.MF" :: Nil) => MergeStrategy.discard
+      case ("services" :: _) => MergeStrategy.concat
+      case _ => MergeStrategy.discard
+    }
+  case _ => MergeStrategy.first
+}
