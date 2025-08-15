@@ -7,7 +7,7 @@ import forex.config.CacheConfig
 import forex.domain.{Currency, Rate}
 import forex.helpers.{MockAlgebra, TestClock, TestData}
 import forex.services.rates.RateCache
-import forex.services.rates.errors.Error.{OneFrameLookupFailed, RateNotFound}
+import forex.services.rates.errors.Error.{InvalidCurrencyPair, OneFrameLookupFailed, RateNotFound}
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -214,5 +214,44 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     // Should have made only one API call
     mockClient.batchCallCount shouldBe 1
+  }
+  
+  it should "reject same currency pairs early" in {
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val service = new CachedOneFrame[IO](mockClient, cache)
+    
+    val samePair = Rate.Pair(Currency.USD, Currency.USD)
+    
+    val result = service.get(samePair).unsafeRunSync()
+    
+    result.isLeft shouldBe true
+    result.left.getOrElse(fail()) shouldBe InvalidCurrencyPair("USDUSD", "same currency conversion not supported")
+    
+    // Should not call API or access cache for invalid pairs
+    mockClient.batchCallCount shouldBe 0
+    mockClient.callCount shouldBe 0
+  }
+  
+  it should "not add invalid pairs to tracked pairs" in {
+    val testClock = new TestClock[IO]
+    implicit val clock = testClock
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val service = new CachedOneFrame[IO](mockClient, cache)
+    
+    // Try to get invalid pair
+    service.get(Rate.Pair(Currency.EUR, Currency.EUR)).unsafeRunSync()
+    
+    // Should not be tracked
+    val trackedPairs = cache.getTrackedPairs.unsafeRunSync()
+    trackedPairs should not contain Rate.Pair(Currency.EUR, Currency.EUR)
+    
+    // Should not make API calls
+    mockClient.batchCallCount shouldBe 0
   }
 }

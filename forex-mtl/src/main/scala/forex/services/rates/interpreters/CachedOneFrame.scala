@@ -6,7 +6,7 @@ import cats.syntax.either._
 import cats.syntax.flatMap._
 import forex.config.{CacheConfig, OneFrameConfig}
 import forex.domain.Rate
-import forex.services.rates.errors.Error.{RateNotFound}
+import forex.services.rates.errors.Error.{InvalidCurrencyPair, RateNotFound}
 import forex.services.rates.{Algebra, RateCache}
 import forex.services.rates.errors._
 import org.slf4j.LoggerFactory
@@ -20,7 +20,27 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
 
   private val logger = LoggerFactory.getLogger(classOf[CachedOneFrame[F]])
 
+  private def validateCurrencyPair(pair: Rate.Pair): Either[Error, Rate.Pair] = {
+    val pairStr = s"${pair.from.show}${pair.to.show}"
+    
+    if (pair.from == pair.to) {
+      Left(InvalidCurrencyPair(pairStr, "same currency conversion not supported"))
+    } else {
+      Right(pair)
+    }
+  }
+
   override def get(pair: Rate.Pair): F[Error Either Rate] = {
+    validateCurrencyPair(pair) match {
+      case Left(error) =>
+        logger.warn(s"Invalid currency pair validation failed: ${error.message}")
+        ConcurrentEffect[F].pure(error.asLeft[Rate])
+      case Right(validPair) =>
+        getCurrencyRate(validPair)
+    }
+  }
+
+  private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
     cache.get(pair).flatMap {
       case Some(cachedRate) =>
         logger.debug(s"Cache HIT for ${pair.from.show}${pair.to.show}")

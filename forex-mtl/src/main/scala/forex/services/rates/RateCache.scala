@@ -64,7 +64,7 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
     Sync[F].delay {
       rates.foreach { rate =>
         val apiTimestamp = rate.timestamp.value.toInstant
-        val expiresAt = apiTimestamp.plusSeconds(ttl.toSeconds)
+        val expiresAt = apiTimestamp.plusMillis(ttl.toMillis)
         cache.put(rate.pair, CachedRate(rate, expiresAt))
       }
     }

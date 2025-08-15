@@ -42,6 +42,11 @@ object errors {
       val message: String = s"Rate limit exceeded: $msg"
       val errorCode: String = "RATE_LIMIT_EXCEEDED"
     }
+    
+    final case class InvalidCurrencyPair(pair: String, reason: String) extends Error {
+      val message: String = s"Invalid currency pair $pair: $reason"
+      val errorCode: String = "INVALID_CURRENCY_PAIR"
+    }
   }
 
 }

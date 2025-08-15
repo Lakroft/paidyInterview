@@ -33,5 +33,7 @@ object errors {
       Error.RateLookupFailed(msg, "SERVICE_UNAVAILABLE", 503)
     case RatesServiceError.RateLimitExceeded(msg) => 
       Error.RateLookupFailed(msg, "RATE_LIMIT_EXCEEDED", 429)
+    case RatesServiceError.InvalidCurrencyPair(pair, reason) => 
+      Error.RateLookupFailed(s"Invalid currency pair $pair: $reason", "INVALID_CURRENCY_PAIR", 400)
   }
 }
