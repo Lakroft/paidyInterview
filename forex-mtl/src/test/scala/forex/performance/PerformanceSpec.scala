@@ -78,7 +78,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     val service = new CachedOneFrame[IO](mockClient, cache)
     
     // Create many different pairs to test memory usage
-    val currencies = List(Currency.USD, Currency.EUR, Currency.JPY, Currency.GBP, Currency.CHF, Currency.SGD, Currency.AUD, Currency.CAD)
+    val currencies = List(Currency.USD, Currency.EUR, Currency.JPY, Currency.GBP, Currency.CHF, Currency.SGD, Currency.AUD, Currency.CAD, Currency.NZD)
     val pairs = for {
       from <- currencies
       to <- currencies

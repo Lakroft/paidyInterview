@@ -41,34 +41,36 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
   }
 
   private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
-    cache.get(pair).flatMap {
-      case Some(cachedRate) =>
-        logger.debug(s"Cache HIT for ${pair.from.show}${pair.to.show}")
-        ConcurrentEffect[F].pure(cachedRate.asRight[Error])
-      case None =>
-        logger.debug(s"Cache MISS for ${pair.from.show}${pair.to.show}")
-        cache.getExpiredTrackedPairs.flatMap { expiredPairs =>
-          val pairsToFetch = (expiredPairs :+ pair).distinct
-          val pairsStr = pairsToFetch.map(p => s"${p.from.show}${p.to.show}").mkString(", ")
-          logger.info(s"Batch request for pairs: [$pairsStr]")
-          
-          client.getBatch(pairsToFetch).flatMap {
-            case Right(rates) =>
-              cache.putBatch(rates).flatMap { _ =>
-                rates.find(_.pair == pair) match {
-                  case Some(rate) => 
-                    ConcurrentEffect[F].pure(rate.asRight[Error])
-                  case None => 
-                    val pairStr = s"${pair.from.show}${pair.to.show}"
-                    logger.warn(s"Requested pair $pairStr not found in batch response")
-                    ConcurrentEffect[F].pure(RateNotFound(pairStr).asLeft[Rate])
+    this.synchronized {
+      cache.get(pair).flatMap {
+        case Some(cachedRate) =>
+          logger.debug(s"Cache HIT for ${pair.from.show}${pair.to.show}")
+          ConcurrentEffect[F].pure(cachedRate.asRight[Error])
+        case None =>
+          logger.debug(s"Cache MISS for ${pair.from.show}${pair.to.show}")
+          cache.getExpiredTrackedPairs.flatMap { expiredPairs =>
+            val pairsToFetch = (expiredPairs :+ pair).distinct
+            val pairsStr = pairsToFetch.map(p => s"${p.from.show}${p.to.show}").mkString(", ")
+            logger.info(s"Batch request for pairs: [$pairsStr]")
+            
+            client.getBatch(pairsToFetch).flatMap {
+              case Right(rates) =>
+                cache.putBatch(rates).flatMap { _ =>
+                  rates.find(_.pair == pair) match {
+                    case Some(rate) => 
+                      ConcurrentEffect[F].pure(rate.asRight[Error])
+                    case None => 
+                      val pairStr = s"${pair.from.show}${pair.to.show}"
+                      logger.warn(s"Requested pair $pairStr not found in batch response")
+                      ConcurrentEffect[F].pure(RateNotFound(pairStr).asLeft[Rate])
+                  }
                 }
-              }
-            case Left(error) =>
-              logger.error(s"Batch API call failed: $error")
-              ConcurrentEffect[F].pure(error.asLeft[Rate])
+              case Left(error) =>
+                logger.error(s"Batch API call failed: $error")
+                ConcurrentEffect[F].pure(error.asLeft[Rate])
+            }
           }
-        }
+      }
     }
   }
 

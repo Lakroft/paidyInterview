@@ -22,7 +22,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "build correct URL for multiple pairs" in {
-    val config = OneFrameConfig("https://forex-api.com", "secret-key")
+    val config = OneFrameConfig("http://api.example.com", "secret-key")
     val client = new OneFrameClient[IO](config)
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),
@@ -31,16 +31,16 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
     )
     
     val url = client.buildBatchUrl(pairs)
-    url shouldBe "https://forex-api.com/rates?pair=USDEUR&pair=JPYUSD&pair=GBPCHF"
+    url shouldBe "http://api.example.com/rates?pair=USDEUR&pair=JPYUSD&pair=GBPCHF"
   }
   
   it should "handle special characters in base URL" in {
-    val config = OneFrameConfig("http://localhost:8080/api/v1", "token123")
+    val config = OneFrameConfig("http://api.example.com:8080/api/v1", "token123")
     val client = new OneFrameClient[IO](config)
     val pairs = List(Rate.Pair(Currency.CHF, Currency.SGD))
     
     val url = client.buildBatchUrl(pairs)
-    url shouldBe "http://localhost:8080/api/v1/rates?pair=CHFSGD"
+    url shouldBe "http://api.example.com:8080/api/v1/rates?pair=CHFSGD"
   }
   
   it should "build URL for empty pair list" in {
