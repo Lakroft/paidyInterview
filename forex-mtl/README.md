@@ -20,7 +20,7 @@ A high-performance, thread-safe forex exchange rate service that acts as a local
 ### Core Components
 
 1. **OneFrameClient** - HTTP client for One-Frame API integration
-2. **RateCache** - TTL-based concurrent cache using ConcurrentHashMap
+2. **RateCache** - TTL-based concurrent cache using TrieMap
 3. **CachedOneFrame** - Main service orchestrating cache and API calls
 
 ## Meeting One-Frame API Limitations
@@ -42,19 +42,20 @@ cache.put(rate.pair, CachedRate(rate, expiresAt))
 ```scala
 // Instead of: 1 request per currency pair
 // We do: 1 request for multiple pairs
-val pairsToFetch = (expiredPairs :+ pair).distinct
+val pairsToFetch = (allCachedPairs :+ requestedPair).distinct
 client.getBatch(pairsToFetch)
 ```
 
 #### 3. Smart Cache Management
-- **Tracked Pairs**: Only cache requested currency pairs
-- **Batch Expiration**: Refresh multiple expired pairs in single API call
-- **Intelligent Grouping**: Combine cache misses into batch requests
+- **Simplified Strategy**: On cache miss, refresh ALL cached pairs + requested pair
+- **TrieMap Storage**: Thread-safe concurrent map for high-performance access
+- **TTL-Based Expiration**: Automatic cleanup of expired rates
 
 ### Efficiency Analysis
 
 **Best Case Scenario**: 
-- 288 API calls/day (one every 5 minutes) + 72 calls for adding pairs to cache
+- 288 API calls/day (one every 5 minutes for all active pairs)
+- Additional calls only when new currency pairs are requested
 
 **Result**: Comfortably within 1000 API calls/day limit 
 
@@ -133,6 +134,90 @@ private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
 2. **Simplicity**: Single point of synchronization, easy to reason about
 3. **Reliability**: No complex lock management or potential deadlocks
 4. **Maintainability**: Future developers can easily understand and modify
+
+## Cache Implementation Alternatives
+
+### Current Solution: In-Memory TrieMap
+```scala
+private val cache = TrieMap[Rate.Pair, CachedRate]()
+```
+
+**Pros**:
+- Simple, lightweight implementation
+- Thread-safe concurrent access
+- No external dependencies
+- Perfect for single-instance deployments
+
+**Cons**:
+- Memory usage grows with number of currency pairs
+- Data lost on application restart
+- No cache eviction policies beyond TTL
+
+### Alternative: EhCache Integration
+
+For production deployments requiring persistence and advanced cache management:
+
+```scala
+// build.sbt
+libraryDependencies += "net.sf.ehcache" % "ehcache" % "2.10.9.2"
+
+// EhCache configuration
+class EhCacheRateCache[F[_]: Sync](cacheManager: CacheManager, config: CacheConfig) extends RateCache[F] {
+  private val cache = cacheManager.getCache("forex-rates")
+  
+  def get(pair: Rate.Pair): F[Option[Rate]] = Sync[F].delay {
+    Option(cache.get(pair.toString))
+      .map(_.asInstanceOf[CachedRate])
+      .filter(cachedRate => !isExpired(cachedRate))
+      .map(_.rate)
+  }
+  
+  def put(rate: Rate): F[Unit] = Sync[F].delay {
+    val element = new Element(rate.pair.toString, CachedRate(rate, expiresAt))
+    cache.put(element)
+  }
+}
+```
+
+**EhCache Benefits**:
+- **Persistence**: Survive application restarts
+- **Memory Management**: LRU eviction, size limits
+- **Monitoring**: JMX integration, cache statistics
+- **Clustering**: Distributed cache for multi-instance setups
+
+**When to Consider EhCache**:
+- Multi-instance deployments requiring shared cache
+- High memory usage concerns
+- Need for cache persistence across restarts
+- Advanced monitoring and management requirements
+
+### Redis Alternative
+
+For microservices architectures:
+
+```scala
+// Redis-based cache implementation
+libraryDependencies += "dev.profunktor" %% "redis4cats-effects" % "1.4.1"
+
+class RedisRateCache[F[_]: Async](redis: RedisCommands[F, String, String]) extends RateCache[F] {
+  def get(pair: Rate.Pair): F[Option[Rate]] = {
+    redis.get(s"rate:${pair.toString}")
+      .map(_.flatMap(json => parseRate(json)))
+      .map(_.filter(rate => !isExpired(rate)))
+  }
+}
+```
+
+**Redis Benefits**:
+- External cache service
+- Horizontal scaling
+- Pub/sub for cache invalidation
+- Rich data structures
+
+**Trade-offs**:
+- Network latency for cache operations
+- Additional infrastructure complexity
+- Requires Redis deployment and management
 
 ## Configuration & Deployment
 
