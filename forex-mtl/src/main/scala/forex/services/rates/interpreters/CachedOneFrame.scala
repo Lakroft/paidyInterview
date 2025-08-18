@@ -48,10 +48,10 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
           ConcurrentEffect[F].pure(cachedRate.asRight[Error])
         case None =>
           logger.debug(s"Cache MISS for ${pair.from.show}${pair.to.show}")
-          cache.getExpiredTrackedPairs.flatMap { expiredPairs =>
-            val pairsToFetch = (expiredPairs :+ pair).distinct
+          cache.getAllCachedPairs.flatMap { allCachedPairs =>
+            val pairsToFetch = (allCachedPairs :+ pair).distinct
             val pairsStr = pairsToFetch.map(p => s"${p.from.show}${p.to.show}").mkString(", ")
-            logger.info(s"Batch request for pairs: [$pairsStr]")
+            logger.info(s"Batch request for ALL pairs: [$pairsStr]")
             
             client.getBatch(pairsToFetch).flatMap {
               case Right(rates) =>

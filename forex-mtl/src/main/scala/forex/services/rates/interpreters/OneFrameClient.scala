@@ -33,7 +33,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
   def buildBatchUrl(pairs: List[Rate.Pair]): String = {
     val pairStrings = pairs.map(p => s"${p.from.show}${p.to.show}")
     val queryString = pairStrings.map(p => s"pair=$p").mkString("&")
-    s"${config.url}/rates?$queryString"
+    s"${config.url}$queryString"
   }
 
   override def getBatch(pairs: List[Rate.Pair])(implicit ev: cats.Applicative[F]): F[Error Either List[Rate]] = {

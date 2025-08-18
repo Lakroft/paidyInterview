@@ -13,7 +13,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   implicit val timer: Timer[IO] = IO.timer(global)
 
   "OneFrameClient" should "build correct URL for single pair" in {
-    val config = OneFrameConfig("http://api.example.com", "test-token")
+    val config = OneFrameConfig("http://api.example.com/rates?", "test-token")
     val client = new OneFrameClient[IO](config)
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
 
@@ -22,7 +22,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "build correct URL for multiple pairs" in {
-    val config = OneFrameConfig("http://api.example.com", "secret-key")
+    val config = OneFrameConfig("http://api.example.com/rates?", "secret-key")
     val client = new OneFrameClient[IO](config)
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),
@@ -35,7 +35,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "handle special characters in base URL" in {
-    val config = OneFrameConfig("http://api.example.com:8080/api/v1", "token123")
+    val config = OneFrameConfig("http://api.example.com:8080/api/v1/rates?", "token123")
     val client = new OneFrameClient[IO](config)
     val pairs = List(Rate.Pair(Currency.CHF, Currency.SGD))
     
@@ -44,7 +44,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "build URL for empty pair list" in {
-    val config = OneFrameConfig("http://test.com", "test-token")
+    val config = OneFrameConfig("http://test.com/rates?", "test-token")
     val client = new OneFrameClient[IO](config)
     
     val url = client.buildBatchUrl(List.empty)
@@ -52,7 +52,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "handle empty batch request" in {
-    val config = OneFrameConfig("http://test.com", "test-token")
+    val config = OneFrameConfig("http://test.com/rates?", "test-token")
     val client = new OneFrameClient[IO](config)
     
     val result = client.getBatch(List.empty).unsafeRunSync()

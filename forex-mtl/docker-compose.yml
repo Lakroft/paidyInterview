@@ -14,7 +14,7 @@ services:
     environment:
       - HTTP_HOST=0.0.0.0
       - HTTP_PORT=8080
-      - ONEFRAME_URL=http://one-frame:8080
+      - ONEFRAME_URL=http://one-frame:8080/rates?
       - ONEFRAME_TOKEN=10dc303535874aeccc86a8251e6992f5
       - CACHE_TTL=5m
     depends_on:
