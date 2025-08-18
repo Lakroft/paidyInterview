@@ -32,17 +32,17 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
     result shouldBe Some(rate)
   }
   
-  it should "track requested pairs" in {
+  it should "return all cached pairs" in {
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
-    val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
+    val rate1 = TestData.createTestRate(Currency.USD, Currency.EUR)
+    val rate2 = TestData.createTestRate(Currency.JPY, Currency.USD)
     
-    cache.get(pair1).unsafeRunSync()
-    cache.get(pair2).unsafeRunSync()
+    cache.put(rate1).unsafeRunSync()
+    cache.put(rate2).unsafeRunSync()
     
-    val trackedPairs = cache.getTrackedPairs.unsafeRunSync()
-    trackedPairs should contain(pair1)
-    trackedPairs should contain(pair2)
+    val cachedPairs = cache.getAllCachedPairs.unsafeRunSync()
+    cachedPairs should contain(rate1.pair)
+    cachedPairs should contain(rate2.pair)
   }
   
   it should "expire rates after TTL" in {
@@ -57,39 +57,11 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
     cache.get(rate.pair).unsafeRunSync() shouldBe None
   }
   
-  it should "identify expired tracked pairs" in {
-    val testClock = TestClock[IO]
-    val cache = new RateCache[IO](CacheConfig(2.seconds))(implicitly, testClock)
-    val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
-    val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
-    val rate1 = TestData.createTestRate(pair1.from, pair1.to)
-    val rate2 = TestData.createTestRate(pair2.from, pair2.to)
-    
-    // Track pairs
-    cache.get(pair1).unsafeRunSync()
-    cache.get(pair2).unsafeRunSync()
-    
-    // Cache rates
-    cache.put(rate1).unsafeRunSync()
-    cache.put(rate2).unsafeRunSync()
-    
-    // Advance time to expire rates
-    testClock.advance(3.seconds)
-    
-    val expiredPairs = cache.getExpiredTrackedPairs.unsafeRunSync()
-    expiredPairs should contain(pair1)
-    expiredPairs should contain(pair2)
-  }
-  
-  it should "include never-cached tracked pairs in expired pairs" in {
+  it should "return empty list when no pairs are cached" in {
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
-    // Track but don't cache
-    cache.get(pair).unsafeRunSync()
-    
-    val expiredPairs = cache.getExpiredTrackedPairs.unsafeRunSync()
-    expiredPairs should contain(pair)
+    val cachedPairs = cache.getAllCachedPairs.unsafeRunSync()
+    cachedPairs shouldBe List.empty
   }
   
   it should "cache multiple rates in batch" in {
@@ -116,9 +88,7 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
     
     cache.clear().unsafeRunSync()
     cache.get(rate.pair).unsafeRunSync() shouldBe None
-    
-    // But tracked pairs should remain
-    cache.getTrackedPairs.unsafeRunSync() should contain(rate.pair)
+    cache.getAllCachedPairs.unsafeRunSync() shouldBe List.empty
   }
   
   it should "use putBatch for single put operation" in {

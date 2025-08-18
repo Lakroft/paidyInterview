@@ -6,7 +6,7 @@ import scala.concurrent.duration._
 
 object TestData {
   
-  def createTestRate(from: Currency, to: Currency, price: BigDecimal = 1.0): Rate = {
+  def createTestRate(from: Currency.Currency, to: Currency.Currency, price: BigDecimal = 1.0): Rate = {
     Rate(
       Rate.Pair(from, to),
       Price(price),
@@ -14,7 +14,7 @@ object TestData {
     )
   }
   
-  def createTestRateWithClock[F[_]](from: Currency, to: Currency, testClock: TestClock[F], price: BigDecimal = 1.0): Rate = {
+  def createTestRateWithClock[F[_]](from: Currency.Currency, to: Currency.Currency, testClock: TestClock[F], price: BigDecimal = 1.0): Rate = {
     val timestamp = Instant.ofEpochMilli(testClock.currentTime).atOffset(java.time.ZoneOffset.UTC)
     Rate(
       Rate.Pair(from, to),
@@ -23,7 +23,7 @@ object TestData {
     )
   }
   
-  def createExpiredRate(from: Currency, to: Currency, price: BigDecimal = 1.0): Rate = {
+  def createExpiredRate(from: Currency.Currency, to: Currency.Currency, price: BigDecimal = 1.0): Rate = {
     Rate(
       Rate.Pair(from, to),
       Price(price),
@@ -31,13 +31,7 @@ object TestData {
     )
   }
   
-  val testPairs = List(
-    Rate.Pair(Currency.USD, Currency.EUR),
-    Rate.Pair(Currency.EUR, Currency.JPY),
-    Rate.Pair(Currency.JPY, Currency.USD),
-    Rate.Pair(Currency.GBP, Currency.USD),
-    Rate.Pair(Currency.CHF, Currency.SGD)
-  )
+  val testPairs = Currency.supportedPairs.take(5).map { case (from, to) => Rate.Pair(from, to) }
   
   val defaultTestConfig = forex.config.ApplicationConfig(
     http = forex.config.HttpConfig("localhost", 8085, 30.seconds),

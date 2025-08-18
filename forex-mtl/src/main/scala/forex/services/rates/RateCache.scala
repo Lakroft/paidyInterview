@@ -1,7 +1,6 @@
 package forex.services.rates
 
 import cats.effect.{Clock, Sync}
-import cats.implicits.toShow
 import cats.syntax.functor._
 import forex.config.CacheConfig
 import forex.domain.Rate
@@ -11,7 +10,7 @@ import java.time.Instant
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import scala.collection.concurrent.TrieMap
 
-case class CachedRate(rate: Rate, expiresAt: Instant)
+final case class CachedRate(rate: Rate, expiresAt: Instant)
 
 class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
   
@@ -23,10 +22,10 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
     Clock[F].realTime(MILLISECONDS).map { nowMillis =>
       cache.get(pair).flatMap { cachedRate =>
         if (cachedRate.expiresAt.isAfter(Instant.ofEpochMilli(nowMillis))) {
-          logger.info(s"Cache HIT for ${pair.from.show}${pair.to.show}")
+          logger.info(s"Cache HIT for ${pair.from}${pair.to}")
           Some(cachedRate.rate)
         } else {
-          logger.info(s"Cache OUTDATED for ${pair.from.show}${pair.to.show}. Now: ${Instant.ofEpochMilli(nowMillis)}, expires at: ${cachedRate.expiresAt}")
+          logger.info(s"Cache OUTDATED for ${pair.from}${pair.to}. Now: ${Instant.ofEpochMilli(nowMillis)}, expires at: ${cachedRate.expiresAt}")
           cache.remove(pair)
           None
         }

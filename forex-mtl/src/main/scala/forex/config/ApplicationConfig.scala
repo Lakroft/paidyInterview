@@ -2,23 +2,23 @@ package forex.config
 
 import scala.concurrent.duration.FiniteDuration
 
-case class ApplicationConfig(
+final case class ApplicationConfig(
     http: HttpConfig,
     oneFrame: OneFrameConfig,
     cache: CacheConfig
 )
 
-case class HttpConfig(
+final case class HttpConfig(
     host: String,
     port: Int,
     timeout: FiniteDuration
 )
 
-case class OneFrameConfig(
+final case class OneFrameConfig(
     url: String,
     token: String
 )
 
-case class CacheConfig(
+final case class CacheConfig(
     ttl: FiniteDuration
 )

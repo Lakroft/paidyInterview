@@ -71,14 +71,13 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
   
   it should "maintain performance under memory pressure" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
     // Create many different pairs to test memory usage
-    val currencies = List(Currency.USD, Currency.EUR, Currency.JPY, Currency.GBP, Currency.CHF, Currency.SGD, Currency.AUD, Currency.CAD, Currency.NZD)
+    val currencies = Currency.allCurrencies.toList
     val pairs = for {
       from <- currencies
       to <- currencies
@@ -92,8 +91,8 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     // First round should make API calls, second round should be cached
     mockClient.batchCallCount shouldBe pairs.length
     
-    // Verify tracked pairs are managed efficiently
-    cache.getTrackedPairs.unsafeRunSync().length shouldBe pairs.length
+    // Verify cached pairs are managed efficiently
+    cache.getAllCachedPairs.unsafeRunSync().length shouldBe pairs.length
   }
   
   it should "handle rapid cache expiration cycles efficiently" in {

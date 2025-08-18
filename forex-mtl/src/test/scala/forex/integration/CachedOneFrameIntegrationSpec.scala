@@ -75,9 +75,9 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     service.get(cachedPair).unsafeRunSync() shouldBe Right(cachedRate)
     service.get(uncachedPair).unsafeRunSync() shouldBe a[Right[_, _]]
     
-    // Should make only 1 batch API call for uncached pair
+    // Should make only 1 batch API call - includes cached pair + uncached pair
     mockClient.batchCallCount shouldBe 1
-    mockClient.batchCalledPairs should contain only List(uncachedPair)
+    mockClient.batchCalledPairs should contain only List(cachedPair, uncachedPair)
   }
   
   it should "recover from API failures and retry successfully" in {

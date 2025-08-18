@@ -1,7 +1,6 @@
 package forex.http
 package rates
 
-import forex.domain.Currency.show
 import forex.domain.Rate.Pair
 import forex.domain._
 import io.circe._
@@ -13,13 +12,13 @@ object Protocol {
   implicit val configuration: Configuration = Configuration.default.withSnakeCaseMemberNames
 
   final case class GetApiRequest(
-      from: Currency,
-      to: Currency
+      from: Currency.Currency,
+      to: Currency.Currency
   )
 
   final case class GetApiResponse(
-      from: Currency,
-      to: Currency,
+      from: Currency.Currency,
+      to: Currency.Currency,
       price: Price,
       timestamp: Timestamp
   )
@@ -30,8 +29,8 @@ object Protocol {
       timestamp: String
   )
 
-  implicit val currencyEncoder: Encoder[Currency] =
-    Encoder.instance[Currency] { show.show _ andThen Json.fromString }
+  implicit val currencyEncoder: Encoder[Currency.Currency] =
+    Encoder.instance[Currency.Currency] { c => Json.fromString(c.toString) }
 
   implicit val pairEncoder: Encoder[Pair] =
     deriveConfiguredEncoder[Pair]

@@ -1,7 +1,6 @@
 package forex.services.rates.interpreters
 
 import cats.effect.{Clock, ConcurrentEffect}
-import cats.implicits.toShow
 import cats.syntax.either._
 import cats.syntax.flatMap._
 import forex.config.{CacheConfig, OneFrameConfig}
@@ -21,7 +20,7 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
   private val logger = LoggerFactory.getLogger(classOf[CachedOneFrame[F]])
 
   private def validateCurrencyPair(pair: Rate.Pair): Either[Error, Rate.Pair] = {
-    val pairStr = s"${pair.from.show}${pair.to.show}"
+    val pairStr = s"${pair.from}${pair.to}"
     
     if (pair.from == pair.to) {
       Left(InvalidCurrencyPair(pairStr, "same currency conversion not supported"))
@@ -44,13 +43,13 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
     this.synchronized {
       cache.get(pair).flatMap {
         case Some(cachedRate) =>
-          logger.debug(s"Cache HIT for ${pair.from.show}${pair.to.show}")
+          logger.debug(s"Cache HIT for ${pair.from}${pair.to}")
           ConcurrentEffect[F].pure(cachedRate.asRight[Error])
         case None =>
-          logger.debug(s"Cache MISS for ${pair.from.show}${pair.to.show}")
+          logger.debug(s"Cache MISS for ${pair.from}${pair.to}")
           cache.getAllCachedPairs.flatMap { allCachedPairs =>
             val pairsToFetch = (allCachedPairs :+ pair).distinct
-            val pairsStr = pairsToFetch.map(p => s"${p.from.show}${p.to.show}").mkString(", ")
+            val pairsStr = pairsToFetch.map(p => s"${p.from}${p.to}").mkString(", ")
             logger.info(s"Batch request for ALL pairs: [$pairsStr]")
             
             client.getBatch(pairsToFetch).flatMap {
@@ -60,7 +59,7 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
                     case Some(rate) => 
                       ConcurrentEffect[F].pure(rate.asRight[Error])
                     case None => 
-                      val pairStr = s"${pair.from.show}${pair.to.show}"
+                      val pairStr = s"${pair.from}${pair.to}"
                       logger.warn(s"Requested pair $pairStr not found in batch response")
                       ConcurrentEffect[F].pure(RateNotFound(pairStr).asLeft[Rate])
                   }

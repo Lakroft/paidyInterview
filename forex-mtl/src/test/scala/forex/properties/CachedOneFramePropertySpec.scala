@@ -132,7 +132,6 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers {
   
   it should "maintain cache consistency under concurrent access" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
@@ -163,7 +162,6 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers {
     )
     
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
@@ -172,10 +170,10 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers {
     // Request all pairs
     testPairs.foreach(service.get(_).unsafeRunSync())
     
-    // Tracked pairs should match distinct requested pairs
-    val trackedPairs = cache.getTrackedPairs.unsafeRunSync().toSet
+    // Cached pairs should match distinct requested pairs
+    val cachedPairs = cache.getAllCachedPairs.unsafeRunSync().toSet
     val distinctRequestedPairs = testPairs.distinct.toSet
     
-    trackedPairs shouldBe distinctRequestedPairs
+    cachedPairs shouldBe distinctRequestedPairs
   }
 }

@@ -1,7 +1,7 @@
 package forex.services.rates.interpreters
 
 import cats.effect.{ConcurrentEffect, Sync}
-import cats.implicits.{catsSyntaxApplicativeError, toFlatMapOps, toShow}
+import cats.implicits.{catsSyntaxApplicativeError, toFlatMapOps}
 import cats.syntax.either._
 import cats.syntax.functor._
 import forex.domain.{Currency, Price, Rate, Timestamp}
@@ -19,7 +19,7 @@ import forex.config.OneFrameConfig
 import java.time.OffsetDateTime
 import scala.concurrent.ExecutionContext
 
-case class OneFrameResponse(
+final case class OneFrameResponse(
     from: String,
     to: String,
     price: BigDecimal,
@@ -31,7 +31,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
   private val logger = LoggerFactory.getLogger(classOf[OneFrameClient[F]])
   
   def buildBatchUrl(pairs: List[Rate.Pair]): String = {
-    val pairStrings = pairs.map(p => s"${p.from.show}${p.to.show}")
+    val pairStrings = pairs.map(p => s"${p.from}${p.to}")
     val queryString = pairStrings.map(p => s"pair=$p").mkString("&")
     s"${config.url}$queryString"
   }
@@ -43,7 +43,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
         ConcurrentEffect[F].pure(List.empty[Rate].asRight[Error])
       }
     } else {
-      val pairsStr = pairs.map(p => s"${p.from.show}${p.to.show}").mkString(", ")
+      val pairsStr = pairs.map(p => s"${p.from}${p.to}").mkString(", ")
       val uriString = buildBatchUrl(pairs)
       val uri = Uri.unsafeFromString(uriString)
       
@@ -69,7 +69,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
             if (responses.isEmpty) {
               logger.warn(s"Empty response from One-Frame for pairs [$pairsStr] - possibly same currency pairs or unsupported pairs")
             } else if (responses.length < pairs.length) {
-              val returnedPairs = rates.map(r => s"${r.pair.from.show}${r.pair.to.show}").mkString(", ")
+              val returnedPairs = rates.map(r => s"${r.pair.from}${r.pair.to}").mkString(", ")
               logger.warn(s"Partial response from One-Frame: requested ${pairs.length} pairs [$pairsStr], received ${responses.length} rates [$returnedPairs]")
             } else {
               logger.debug(s"Batch request successful: received ${rates.length} rates")
@@ -120,7 +120,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
         rates.headOption match {
           case Some(rate) => rate.asRight[Error]
           case None => 
-            val pairStr = s"${pair.from.show}${pair.to.show}"
+            val pairStr = s"${pair.from}${pair.to}"
             logger.warn(s"No rate found in API response for pair: $pairStr")
             (RateNotFound(pairStr): Error).asLeft[Rate]
         }

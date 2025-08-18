@@ -238,7 +238,6 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   
   it should "not add invalid pairs to tracked pairs" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
@@ -247,9 +246,9 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     // Try to get invalid pair
     service.get(Rate.Pair(Currency.EUR, Currency.EUR)).unsafeRunSync()
     
-    // Should not be tracked
-    val trackedPairs = cache.getTrackedPairs.unsafeRunSync()
-    trackedPairs should not contain Rate.Pair(Currency.EUR, Currency.EUR)
+    // Should not be cached
+    val cachedPairs = cache.getAllCachedPairs.unsafeRunSync()
+    cachedPairs should not contain Rate.Pair(Currency.EUR, Currency.EUR)
     
     // Should not make API calls
     mockClient.batchCallCount shouldBe 0
