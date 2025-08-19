@@ -3,13 +3,15 @@ package rates
 
 import cats.effect.Sync
 import cats.syntax.flatMap._
+import forex.domain.Currency
 import forex.programs.RatesProgram
-import forex.programs.rates.{ Protocol => RatesProgramProtocol }
+import forex.programs.rates.{Protocol => RatesProgramProtocol}
 import forex.programs.rates.errors.Error
 import org.http4s.{HttpRoutes, Status}
 import org.http4s.dsl.Http4sDsl
 import org.http4s.server.Router
 import org.slf4j.LoggerFactory
+
 import java.time.Instant
 
 class RatesHttpRoutes[F[_]: Sync](rates: RatesProgram[F]) extends Http4sDsl[F] {
@@ -44,7 +46,7 @@ class RatesHttpRoutes[F[_]: Sync](rates: RatesProgram[F]) extends Http4sDsl[F] {
       Sync[F].delay(logger.warn(s"Invalid currency parameters in request: ${req.uri.query}")).flatMap { _ =>
         val errorResponse = ErrorApiResponse(
           error = "INVALID_PARAMETERS",
-          message = "Invalid currency parameters. Supported currencies: AUD, CAD, CHF, EUR, GBP, NZD, JPY, SGD, USD",
+          message = "Invalid currency parameters. Supported currencies: " + Currency.allCurrencies.mkString(", "),
           timestamp = Instant.now().toString
         )
         BadRequest(errorResponse)

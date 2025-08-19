@@ -7,7 +7,7 @@ A high-performance, thread-safe forex exchange rate service that acts as a local
 ### Requirements 
 - The service returns an exchange rate when provided with 2 supported currencies
 - The rate should not be older than 5 minutes
-- The service should support at least 10,000 successful requests per day with 1 API token (limited to 1000 requests per day)
+- The service should support at least 10,000 successful requests per day with 1 API token (limited to 1000 requests per day per token)
 
 ### Key Concepts
 
@@ -259,9 +259,9 @@ sbt test
 ### Structured Error Responses
 ```json
 {
-  "error": "INVALID_CURRENCY_PAIR",
-  "message": "Invalid currency pair USDXXX: unknown currency XYZ",
-  "timestamp": "2025-08-18T12:00:00Z"
+  "error":"INVALID_PARAMETERS",
+  "message":"Invalid currency parameters. Supported currencies: AUD, JPY, CAD, NZD, CHF, SGD, EUR, USD, GBP",
+  "timestamp":"2025-08-19T01:29:02.234068157Z"
 }
 ```
 
@@ -271,3 +271,18 @@ sbt test
 - **429**: Rate limiting (quota exceeded)
 - **500**: Internal server errors, One-Frame API issues
 - **503**: Service unavailable
+
+### Error Logging & Alerts
+
+All errors are logged in detail using the project's logger. These logs can be integrated with alerting systems (e.g., via Prometheus, Grafana, or external log monitoring) to notify operators about critical issues.
+
+#### Example error logs:
+
+```scala
+logger.error(s"Invalid currency parameters: $params")
+logger.error(s"One-Frame API authentication failed: ${ex.getMessage}")
+logger.error(s"Rate limit exceeded for token: $token")
+logger.error(s"Unexpected error fetching rates: ${ex.getMessage}", ex)
+```
+
+Alerts can be configured to trigger on specific error patterns or severity levels in the logs.
