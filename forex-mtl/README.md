@@ -219,6 +219,33 @@ class RedisRateCache[F[_]: Async](redis: RedisCommands[F, String, String]) exten
 - Additional infrastructure complexity
 - Requires Redis deployment and management
 
+## Direct and Reverse Currency Pairs Handling
+
+In the current implementation, direct and reverse currency pairs (e.g., USD/EUR and EUR/USD) are requested separately from the API. This simplifies the logic but may lead to discrepancies between direct and reverse rates due to data source specifics or rounding.
+
+**Alternative approach:**
+Only the direct pair (e.g., USD/EUR) is requested, and the reverse pair (EUR/USD) is automatically calculated as `1 / direct_rate`. This guarantees mathematical consistency between pairs, but requires additional logic for request handling and caching.
+
+**Example of alternative implementation:**
+```scala
+def getRate(pair: Rate.Pair): F[Error Either Rate] = {
+  cache.get(pair) match {
+    case Some(rate) => F.pure(rate.asRight)
+    case None =>
+      val directPair = pair
+      val reversePair = Rate.Pair(pair.to, pair.from)
+      cache.get(reversePair) match {
+        case Some(reverseRate) =>
+          // Calculate reverse rate
+          val calculatedRate = 1.0 / reverseRate.price
+          F.pure(Rate(pair.from, pair.to, calculatedRate).asRight)
+        case None =>
+          // Request direct pair from API
+          fetchAndCacheRate(directPair)
+      }
+  }
+}
+```
 ## Configuration & Deployment
 
 ### Environment Configuration
