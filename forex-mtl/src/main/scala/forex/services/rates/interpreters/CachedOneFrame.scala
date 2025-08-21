@@ -40,35 +40,45 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
   }
 
   private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
-    this.synchronized {
-      cache.get(pair).flatMap {
-        case Some(cachedRate) =>
-          logger.debug(s"Cache HIT for ${pair.from}${pair.to}")
-          ConcurrentEffect[F].pure(cachedRate.asRight[Error])
-        case None =>
-          logger.debug(s"Cache MISS for ${pair.from}${pair.to}")
-          cache.getAllCachedPairs.flatMap { allCachedPairs =>
-            val pairsToFetch = (allCachedPairs :+ pair).distinct
-            val pairsStr = pairsToFetch.map(p => s"${p.from}${p.to}").mkString(", ")
-            logger.info(s"Batch request for ALL pairs: [$pairsStr]")
-            
-            client.getBatch(pairsToFetch).flatMap {
-              case Right(rates) =>
-                cache.putBatch(rates).flatMap { _ =>
-                  rates.find(_.pair == pair) match {
-                    case Some(rate) => 
-                      ConcurrentEffect[F].pure(rate.asRight[Error])
-                    case None => 
-                      val pairStr = s"${pair.from}${pair.to}"
-                      logger.warn(s"Requested pair $pairStr not found in batch response")
-                      ConcurrentEffect[F].pure(RateNotFound(pairStr).asLeft[Rate])
-                  }
-                }
-              case Left(error) =>
-                logger.error(s"Batch API call failed: $error")
-                ConcurrentEffect[F].pure(error.asLeft[Rate])
+    cache.get(pair).flatMap {
+      case Some(cachedRate) =>
+        logger.debug(s"Cache HIT for ${pair.from}${pair.to} (unsynchronized read)")
+        ConcurrentEffect[F].pure(cachedRate.asRight[Error])
+      case None =>
+        this.synchronized {
+          cache.get(pair).flatMap {
+            case Some(cachedRate) =>
+              logger.debug(s"Cache HIT for ${pair.from}${pair.to} (synchronized double-check)")
+              ConcurrentEffect[F].pure(cachedRate.asRight[Error])
+            case None =>
+              logger.debug(s"Cache MISS for ${pair.from}${pair.to} (confirmed after double-check)")
+              performBatchAPICall(pair)
+          }
+        }
+    }
+  }
+
+  private def performBatchAPICall(pair: Rate.Pair): F[Error Either Rate] = {
+    cache.getAllCachedPairs.flatMap { allCachedPairs =>
+      val pairsToFetch = (allCachedPairs :+ pair).distinct
+      val pairsStr = pairsToFetch.map(p => s"${p.from}${p.to}").mkString(", ")
+      logger.info(s"Batch request for ALL pairs: [$pairsStr]")
+      
+      client.getBatch(pairsToFetch).flatMap {
+        case Right(rates) =>
+          cache.putBatch(rates).flatMap { _ =>
+            rates.find(_.pair == pair) match {
+              case Some(rate) => 
+                ConcurrentEffect[F].pure(rate.asRight[Error])
+              case None => 
+                val pairStr = s"${pair.from}${pair.to}"
+                logger.warn(s"Requested pair $pairStr not found in batch response")
+                ConcurrentEffect[F].pure(RateNotFound(pairStr).asLeft[Rate])
             }
           }
+        case Left(error) =>
+          logger.error(s"Batch API call failed: $error")
+          ConcurrentEffect[F].pure(error.asLeft[Rate])
       }
     }
   }
