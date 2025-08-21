@@ -55,7 +55,7 @@ client.getBatch(pairsToFetch)
 
 **Best Case Scenario**: 
 - 288 API calls/day (one every 5 minutes for all active pairs)
-- Additional calls only when new currency pairs are requested
+- Additional calls only when new currency pairs are requested (max 72)
 
 **Result**: Comfortably within 1000 API calls/day limit 
 
