@@ -299,6 +299,7 @@ environment:
   - HTTP_PORT=8080
   - ONEFRAME_URL=http://one-frame:8080/rates?
   - ONEFRAME_TOKEN=10dc303535874aeccc86a8251e6992f5
+  - ONEFRAME_TIME_TOLERANCE=30s
   - CACHE_TTL=5m
 ```
 
@@ -312,6 +313,7 @@ docker build -t forex-mtl .
 docker run -p 8080:8080 \
   -e ONEFRAME_URL=https://api.oneframe.com \
   -e ONEFRAME_TOKEN=your_token \
+  -e ONEFRAME_TIME_TOLERANCE=30s \
   forex-mtl
 ```
 
@@ -341,6 +343,40 @@ sbt test
 - **429**: Rate limiting (quota exceeded)
 - **500**: Internal server errors, One-Frame API issues
 - **503**: Service unavailable
+
+### Time Synchronization Monitoring
+
+The service includes configurable time synchronization monitoring to detect clock drift between servers:
+
+**Configuration:**
+```hocon
+app {
+  one-frame {
+    time-tolerance = ${ONEFRAME_TIME_TOLERANCE}
+  }
+}
+```
+
+**Monitoring Logic:**
+- Compares API timestamps with local server time
+- Logs warnings when time difference exceeds configured tolerance
+- Provides ops team with early warning for NTP synchronization issues
+
+**Implementation:**
+```scala
+def checkTimeSync(timestamp: String): Unit = {
+  val timeDiff = Duration.between(now, apiTimestamp).abs()
+  if (timeDiff > config.timeTolerance) {
+    logger.warn(s"Time sync issue: ${timeDiff.getSeconds}s difference")
+  }
+}
+```
+
+**Why This Approach:**
+- **Simple and reliable** - minimal complexity, maximum uptime
+- **Configurable thresholds** - adjust sensitivity per environment  
+- **Operations-friendly** - provides monitoring without service disruption
+- **Production-ready** - battle-tested approach for distributed systems
 
 ### Error Logging & Alerts
 

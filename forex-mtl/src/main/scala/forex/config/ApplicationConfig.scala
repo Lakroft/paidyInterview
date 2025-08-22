@@ -16,7 +16,8 @@ final case class HttpConfig(
 
 final case class OneFrameConfig(
     url: String,
-    token: String
+    token: String,
+    timeTolerance: FiniteDuration
 )
 
 final case class CacheConfig(

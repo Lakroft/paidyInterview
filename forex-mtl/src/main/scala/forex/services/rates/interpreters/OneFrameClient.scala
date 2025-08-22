@@ -30,6 +30,21 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
 
   private val logger = LoggerFactory.getLogger(classOf[OneFrameClient[F]])
   
+  def checkTimeSync(timestamp: String): Unit = {
+    try {
+      val apiTimestamp = OffsetDateTime.parse(timestamp)
+      val now = OffsetDateTime.now()
+      val timeDiff = java.time.Duration.between(now, apiTimestamp).abs()
+      
+      if (timeDiff.compareTo(java.time.Duration.ofSeconds(config.timeTolerance.toSeconds)) > 0) {
+        logger.warn(s"Time synchronization issue detected: API timestamp $timestamp differs from server time by ${timeDiff.getSeconds} seconds (tolerance: ${config.timeTolerance.toSeconds}s)")
+      }
+    } catch {
+      case ex: Exception =>
+        logger.warn(s"Invalid timestamp format from API: $timestamp - ${ex.getMessage}")
+    }
+  }
+  
   def buildBatchUrl(pairs: List[Rate.Pair]): String = {
     val pairStrings = pairs.map(p => s"${p.from}${p.to}")
     val queryString = pairStrings.map(p => s"pair=$p").mkString("&")
@@ -57,6 +72,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
 
           client.expect[List[OneFrameResponse]](request).map { responses =>
             val rates = responses.flatMap { response =>
+              checkTimeSync(response.time_stamp)
               for {
                 fromCurrency <- Currency.fromString(response.from)
                 toCurrency <- Currency.fromString(response.to)

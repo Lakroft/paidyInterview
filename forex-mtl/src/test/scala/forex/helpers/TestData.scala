@@ -35,7 +35,7 @@ object TestData {
   
   val defaultTestConfig = forex.config.ApplicationConfig(
     http = forex.config.HttpConfig("localhost", 8085, 30.seconds),
-    oneFrame = forex.config.OneFrameConfig("http://localhost:8080", "test-token"),
+    oneFrame = forex.config.OneFrameConfig("http://localhost:8080", "test-token", 30.seconds),
     cache = forex.config.CacheConfig(5.minutes)
   )
 }
