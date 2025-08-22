@@ -34,10 +34,12 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
     try {
       val apiTimestamp = OffsetDateTime.parse(timestamp)
       val now = OffsetDateTime.now()
-      val timeDiff = java.time.Duration.between(now, apiTimestamp).abs()
+      val timeDiff = java.time.Duration.between(now, apiTimestamp)
+      val absDiff = timeDiff.abs()
       
-      if (timeDiff.compareTo(java.time.Duration.ofSeconds(config.timeTolerance.toSeconds)) > 0) {
-        logger.warn(s"Time synchronization issue detected: API timestamp $timestamp differs from server time by ${timeDiff.getSeconds} seconds (tolerance: ${config.timeTolerance.toSeconds}s)")
+      if (absDiff.compareTo(java.time.Duration.ofSeconds(config.timeTolerance.toSeconds)) > 0) {
+        val direction = if (timeDiff.isNegative) "behind" else "ahead"
+        logger.warn(s"Time synchronization issue detected: API timestamp $timestamp is ${absDiff.getSeconds}s $direction of server time $now (tolerance: ${config.timeTolerance.toSeconds}s)")
       }
     } catch {
       case ex: Exception =>

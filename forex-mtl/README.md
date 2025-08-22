@@ -365,11 +365,18 @@ app {
 **Implementation:**
 ```scala
 def checkTimeSync(timestamp: String): Unit = {
-  val timeDiff = Duration.between(now, apiTimestamp).abs()
-  if (timeDiff > config.timeTolerance) {
-    logger.warn(s"Time sync issue: ${timeDiff.getSeconds}s difference")
+  val timeDiff = Duration.between(now, apiTimestamp)
+  val direction = if (timeDiff.isNegative) "behind" else "ahead"
+  if (timeDiff.abs() > config.timeTolerance) {
+    logger.warn(s"API timestamp is ${timeDiff.abs().getSeconds}s $direction of server time")
   }
 }
+```
+
+**Example log output:**
+```
+WARN - Time synchronization issue detected: API timestamp 2025-08-22T10:00:00Z is 45s ahead of server time 2025-08-22T09:59:15Z (tolerance: 30s)
+WARN - Time synchronization issue detected: API timestamp 2025-08-22T09:58:30Z is 90s behind of server time 2025-08-22T10:00:00Z (tolerance: 30s)
 ```
 
 **Why This Approach:**

@@ -1,6 +1,7 @@
 package forex.services.rates
 
 import cats.effect.{Clock, Sync}
+import cats.implicits.toFlatMapOps
 import cats.syntax.functor._
 import forex.config.CacheConfig
 import forex.domain.Rate
@@ -44,11 +45,12 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
   }
   
   def putBatch(rates: List[Rate]): F[Unit] = {
-    Sync[F].delay {
-      rates.foreach { rate =>
-        val apiTimestamp = rate.timestamp.value.toInstant
-        val expiresAt = apiTimestamp.plusMillis(ttl.toMillis)
-        cache.put(rate.pair, CachedRate(rate, expiresAt))
+    Clock[F].realTime(MILLISECONDS).flatMap { nowMillis =>
+      Sync[F].delay {
+        val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
+        rates.foreach { rate =>
+          cache.put(rate.pair, CachedRate(rate, expiresAt))
+        }
       }
     }
   }
