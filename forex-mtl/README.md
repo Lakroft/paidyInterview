@@ -59,6 +59,43 @@ client.getBatch(pairsToFetch)
 
 **Result**: Comfortably within 1000 API calls/day limit 
 
+## TTL Strategy: Server Time vs API Timestamp
+
+### Design Decision
+
+The cache TTL is calculated from **server time** rather than the API's `time_stamp` field. This is a deliberate architectural choice with important implications:
+
+```scala
+// Current implementation - server time based
+val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
+
+// Alternative approach - API timestamp based
+val expiresAt = apiTimestamp.plusMillis(ttl.toMillis)
+```
+
+### Trade-off Analysis
+
+**Server Time Approach (Current):**
+- ✅ **Predictable API usage**: Exactly 288 calls/day guaranteed
+- ✅ **Quota safety**: Never exceeds One-Frame limits unexpectedly  
+- ✅ **Clock drift resilient**: Independent of API server time synchronization
+- ✅ **Production stable**: System behavior is deterministic
+- ❌ **Theoretical precision loss**: May serve data slightly older than 5 minutes in edge cases
+
+**API Timestamp Approach (Alternative):**
+- ✅ **Stricter data freshness**: Never serves data older than 5 minutes from source
+- ✅ **Theoretical correctness**: TTL reflects actual data age
+- ❌ **Unpredictable API usage**: 288-1440 calls/day depending on API timestamp delays
+- ❌ **Quota risk**: Could exhaust daily limit if API timestamps are stale
+- ❌ **Clock sync dependency**: Breaks down with time synchronization issues
+
+### Why Server Time Was Chosen
+
+1. **Business Constraint Priority**: Meeting the 10,000 requests/day requirement with 1,000 API calls/day limit
+2. **Production Reliability**: Predictable resource consumption over theoretical precision
+3. **System Stability**: Resilience to external service timing variations
+4. **Monitoring Capability**: Time sync warnings provide visibility into any precision trade-offs
+
 ## Reliability & High Availability
 
 ### Multi-Node Deployment Strategy
