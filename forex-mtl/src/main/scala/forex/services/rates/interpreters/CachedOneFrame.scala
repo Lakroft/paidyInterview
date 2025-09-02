@@ -4,7 +4,7 @@ import cats.effect.{Clock, ConcurrentEffect}
 import cats.syntax.either._
 import cats.syntax.flatMap._
 import forex.config.{CacheConfig, OneFrameConfig}
-import forex.domain.Rate
+import forex.domain.{Currency, Rate}
 import forex.services.rates.errors.Error.{InvalidCurrencyPair, RateNotFound}
 import forex.services.rates.{Algebra, RateCache}
 import forex.services.rates.errors._
@@ -59,12 +59,11 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
   }
 
   private def performBatchAPICall(pair: Rate.Pair): F[Error Either Rate] = {
-    cache.getAllCachedPairs.flatMap { allCachedPairs =>
-      val pairsToFetch = (allCachedPairs :+ pair).distinct
-      val pairsStr = pairsToFetch.map(p => s"${p.from}${p.to}").mkString(", ")
-      logger.info(s"Batch request for ALL pairs: [$pairsStr]")
-      
-      client.getBatch(pairsToFetch).flatMap {
+    val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }
+    val pairsStr = allSupportedPairs.map(p => s"${p.from}${p.to}").mkString(", ")
+    logger.info(s"Batch request for ALL supported pairs: [$pairsStr]")
+    
+    client.getBatch(allSupportedPairs).flatMap {
         case Right(rates) =>
           cache.putBatch(rates).flatMap { _ =>
             rates.find(_.pair == pair) match {
@@ -80,7 +79,6 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
           logger.error(s"Batch API call failed: $error")
           ConcurrentEffect[F].pure(error.asLeft[Rate])
       }
-    }
   }
 
 }
