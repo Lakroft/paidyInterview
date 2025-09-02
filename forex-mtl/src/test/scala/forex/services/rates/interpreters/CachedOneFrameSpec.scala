@@ -58,8 +58,10 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     // Advance time to expire rates
     testClock.advance(10.seconds)
     
-    // Setup mock expectation
-    mockClient.expectBatchCall(List(pair1, pair2))
+    // Setup mock expectation - now expects all supported pairs
+    import forex.domain.Currency
+    val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }
+    mockClient.expectBatchCall(allSupportedPairs)
     
     val result = service.get(pair1).unsafeRunSync()
     

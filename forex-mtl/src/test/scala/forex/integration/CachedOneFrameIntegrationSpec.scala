@@ -5,7 +5,7 @@ import cats.effect.{ContextShift, IO, Timer}
 import scala.concurrent.ExecutionContext.Implicits.global
 import forex.config.CacheConfig
 import forex.domain.{Currency, Rate}
-import forex.helpers.{MockAlgebra, TestClock, TestData}
+import forex.helpers.{MockAlgebra, TestClock}
 import forex.services.rates.RateCache
 import forex.services.rates.interpreters.CachedOneFrame
 import org.scalatest.flatspec.AnyFlatSpec
@@ -29,11 +29,11 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
       Rate.Pair(Currency.GBP, Currency.CHF)
     )
     
-    // Phase 1: Initial requests - should make 3 batch calls (each with single pair)
+    // Phase 1: Initial requests - should make 1 batch call (for all supported pairs)
     pairs.foreach { pair =>
       service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
     }
-    mockClient.batchCallCount shouldBe 3
+    mockClient.batchCallCount shouldBe 1
     
     // Phase 2: Immediate re-requests - should use cache
     mockClient.reset()
@@ -59,25 +59,27 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     mockClient.batchCallCount shouldBe 1
   }
   
-  it should "handle mixed cache states correctly" in {
+  it should "cache all pairs when any cache miss occurs" in {
     val mockClient = new MockAlgebra[IO]
     val cache = new RateCache[IO](CacheConfig(5.minutes))
     val service = new CachedOneFrame[IO](mockClient, cache)
     
-    val cachedPair = Rate.Pair(Currency.USD, Currency.EUR)
-    val uncachedPair = Rate.Pair(Currency.JPY, Currency.USD)
+    val firstPair = Rate.Pair(Currency.USD, Currency.EUR)
+    val secondPair = Rate.Pair(Currency.JPY, Currency.USD)
     
-    // Pre-cache one pair
-    val cachedRate = TestData.createTestRate(cachedPair.from, cachedPair.to)
-    cache.put(cachedRate).unsafeRunSync()
-    
-    // Request both pairs
-    service.get(cachedPair).unsafeRunSync() shouldBe Right(cachedRate)
-    service.get(uncachedPair).unsafeRunSync() shouldBe a[Right[_, _]]
-    
-    // Should make only 1 batch API call - includes cached pair + uncached pair
+    // Request first pair - should trigger batch for all supported pairs
+    service.get(firstPair).unsafeRunSync() shouldBe a[Right[_, _]]
     mockClient.batchCallCount shouldBe 1
-    mockClient.batchCalledPairs should contain only List(cachedPair, uncachedPair)
+    
+    // Request second pair - should use cache (no additional API calls)
+    mockClient.reset()
+    service.get(secondPair).unsafeRunSync() shouldBe a[Right[_, _]]
+    mockClient.batchCallCount shouldBe 0
+    
+    // All supported pairs should be cached
+    import forex.domain.Currency
+    val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }.toSet
+    cache.getAllCachedPairs.unsafeRunSync().toSet shouldBe allSupportedPairs
   }
   
   it should "recover from API failures and retry successfully" in {
@@ -166,7 +168,8 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     
     mockClient.batchCallCount shouldBe 1
 
-    // Verify all pairs were included in the batch
-    mockClient.batchCalledPairs.head.toSet shouldBe pairs.toSet
+    // Verify all supported pairs were included in the batch
+    import forex.domain.Currency
+    mockClient.batchCalledPairs.head.toSet shouldBe Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }.toSet
   }
 }

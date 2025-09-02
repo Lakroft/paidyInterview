@@ -88,8 +88,8 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     pairs.foreach(service.get(_).unsafeRunSync())
     pairs.foreach(service.get(_).unsafeRunSync())
     
-    // First round should make API calls, second round should be cached
-    mockClient.batchCallCount shouldBe pairs.length
+    // First round should make 1 batch API call, second round should be cached
+    mockClient.batchCallCount shouldBe 1
     
     // Verify cached pairs are managed efficiently
     cache.getAllCachedPairs.unsafeRunSync().length shouldBe pairs.length

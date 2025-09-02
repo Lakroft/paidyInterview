@@ -11,34 +11,51 @@ import java.time.Instant
 import java.util.concurrent.TimeUnit.MILLISECONDS
 import scala.collection.concurrent.TrieMap
 
-final case class CachedRate(rate: Rate, expiresAt: Instant)
 
 class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
   
-  private val cache = TrieMap[Rate.Pair, CachedRate]()
+  private val cache = TrieMap[Rate.Pair, Rate]()
+  @volatile private var cacheExpiresAt: Option[Instant] = None
   private val ttl = config.ttl
   private val logger = LoggerFactory.getLogger(classOf[RateCache[F]])
 
   def get(pair: Rate.Pair): F[Option[Rate]] = {
     Clock[F].realTime(MILLISECONDS).map { nowMillis =>
-      cache.get(pair).flatMap { cachedRate =>
-        if (cachedRate.expiresAt.isAfter(Instant.ofEpochMilli(nowMillis))) {
-          logger.info(s"Cache HIT for ${pair.from}${pair.to}")
-          Some(cachedRate.rate)
-        } else {
-          logger.info(s"Cache OUTDATED for ${pair.from}${pair.to}. Now: ${Instant.ofEpochMilli(nowMillis)}, expires at: ${cachedRate.expiresAt}")
-          cache.remove(pair)
+      val now = Instant.ofEpochMilli(nowMillis)
+      cacheExpiresAt match {
+        case Some(expiresAt) if expiresAt.isAfter(now) =>
+          cache.get(pair) match {
+            case Some(rate) =>
+              logger.info(s"Cache HIT for ${pair.from}${pair.to}")
+              Some(rate)
+            case None =>
+              None
+          }
+        case Some(expiresAt) =>
+          logger.info(s"Cache OUTDATED for all pairs. Now: $now, expires at: $expiresAt")
+          cache.clear()
+          cacheExpiresAt = None
           None
-        }
+        case None =>
+          None
       }
     }
   }
 
   def put(rate: Rate): F[Unit] = {
-    putBatch(List(rate))
+    Clock[F].realTime(MILLISECONDS).flatMap { nowMillis =>
+      Sync[F].delay {
+        val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
+        cache.put(rate.pair, rate)
+        cacheExpiresAt = Some(expiresAt)
+      }
+    }
   }
 
-  def clear(): F[Unit] = Sync[F].delay(cache.clear())
+  def clear(): F[Unit] = Sync[F].delay {
+    cache.clear()
+    cacheExpiresAt = None
+  }
   
   def getAllCachedPairs: F[List[Rate.Pair]] = {
     Sync[F].delay(cache.keys.toList)
@@ -48,9 +65,11 @@ class RateCache[F[_]: Sync: Clock](config: CacheConfig) {
     Clock[F].realTime(MILLISECONDS).flatMap { nowMillis =>
       Sync[F].delay {
         val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
+        cache.clear()
         rates.foreach { rate =>
-          cache.put(rate.pair, CachedRate(rate, expiresAt))
+          cache.put(rate.pair, rate)
         }
+        cacheExpiresAt = Some(expiresAt)
       }
     }
   }

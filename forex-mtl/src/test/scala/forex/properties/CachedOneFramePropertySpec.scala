@@ -123,9 +123,11 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers {
       // Should make exactly one batch call
       mockClient.batchCallCount shouldBe 1
 
-      // Batch should include all expired pairs
+      // Batch should include all supported pairs
       if (mockClient.batchCalledPairs.nonEmpty) {
-        mockClient.batchCalledPairs.head.toSet shouldBe validPairs.toSet
+        import forex.domain.Currency
+        val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }
+        mockClient.batchCalledPairs.head.toSet shouldBe allSupportedPairs.toSet
       }
     }
   }
@@ -170,10 +172,11 @@ class CachedOneFramePropertySpec extends AnyFlatSpec with Matchers {
     // Request all pairs
     testPairs.foreach(service.get(_).unsafeRunSync())
     
-    // Cached pairs should match distinct requested pairs
+    // Cached pairs should match all supported pairs (since batch loads everything)
     val cachedPairs = cache.getAllCachedPairs.unsafeRunSync().toSet
-    val distinctRequestedPairs = testPairs.distinct.toSet
+    import forex.domain.Currency
+    val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }.toSet
     
-    cachedPairs shouldBe distinctRequestedPairs
+    cachedPairs shouldBe allSupportedPairs
   }
 }
