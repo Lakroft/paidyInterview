@@ -20,7 +20,7 @@ A high-performance, thread-safe forex exchange rate service that acts as a local
 ### Core Components
 
 1. **OneFrameClient** - HTTP client for One-Frame API integration
-2. **RateCache** - TTL-based concurrent cache using TrieMap
+2. **RateCache** - TTL-based concurrent cache using TrieMap with unified expiration
 3. **CachedOneFrame** - Main service orchestrating cache and API calls
 
 ## Meeting One-Frame API Limitations
@@ -32,30 +32,31 @@ A high-performance, thread-safe forex exchange rate service that acts as a local
 
 ### Solution Strategy
 
-#### 1. TTL-Based Caching (5 minutes)
+#### 1. Unified TTL-Based Caching (5 minutes)
 ```scala
-val expiresAt = apiTimestamp.plusMillis(ttl.toMillis)
-cache.put(rate.pair, CachedRate(rate, expiresAt))
+// Single expiration time for entire cache
+@volatile private var cacheExpiresAt: Option[Instant] = None
+val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
+cacheExpiresAt = Some(expiresAt)
 ```
 
-#### 2. Batch API Optimization
+#### 2. Complete Batch API Optimization
 ```scala
-// Instead of: 1 request per currency pair
-// We do: 1 request for multiple pairs
-val pairsToFetch = (allCachedPairs :+ requestedPair).distinct
-client.getBatch(pairsToFetch)
+// Always request ALL supported currency pairs in single batch
+val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }
+client.getBatch(allSupportedPairs)
 ```
 
-#### 3. Smart Cache Management
-- **Simplified Strategy**: On cache miss, refresh ALL cached pairs + requested pair
+#### 3. Unified Cache Management
+- **All-or-Nothing Strategy**: On any cache miss, refresh ALL supported pairs at once
+- **Single TTL**: Entire cache expires together, eliminating partial cache states
 - **TrieMap Storage**: Thread-safe concurrent map for high-performance access
-- **TTL-Based Expiration**: Automatic cleanup of expired rates
 
 ### Efficiency Analysis
 
-**Best Case Scenario**: 
-- 288 API calls/day (one every 5 minutes for all active pairs)
-- Additional calls only when new currency pairs are requested (max 72)
+**Optimized Scenario**: 
+- 288 API calls/day (one every 5 minutes for all supported pairs)
+- No additional calls for new currency pairs (all pairs loaded in each batch)
 
 **Result**: Comfortably within 1000 API calls/day limit 
 
@@ -219,7 +220,8 @@ private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
 
 ### Current Solution: In-Memory TrieMap
 ```scala
-private val cache = TrieMap[Rate.Pair, CachedRate]()
+private val cache = TrieMap[Rate.Pair, Rate]()
+@volatile private var cacheExpiresAt: Option[Instant] = None
 ```
 
 **Pros**:
@@ -342,8 +344,13 @@ environment:
 
 ### Docker Deployment
 ```bash
-# Development
+# Development (default profile)
 docker-compose up
+# or explicitly:
+docker-compose --profile default up
+
+# Testing (test profile with faster TTL)
+docker-compose --profile test up
 
 # Production  
 docker build -t forex-mtl .
@@ -354,6 +361,77 @@ docker run -p 8080:8080 \
   forex-mtl
 ```
 
+### Docker Compose Profiles
+
+**Default Profile (`docker-compose up`)**:
+- Runs `forex-mtl` service with production settings
+- Cache TTL: 5 minutes
+- Time tolerance: 30 seconds
+- Direct connection: forex-mtl → one-frame
+
+**Test Profile (`docker-compose --profile test up`)**:
+- Runs `forex-mtl-test` service with test settings
+- Includes logging proxy server for API call monitoring
+- Cache TTL: 2 seconds (faster test execution)
+- Time tolerance: 10 seconds
+- Proxied connection: forex-mtl-test → proxy → one-frame
+- No restart policy for test containers
+
+### Request Flow in Test Mode
+
+```
+Client → forex-mtl-test:8087 → proxy:8088 → one-frame:8080
+```
+
+The proxy logs all API calls with:
+- Timestamp
+- Request method, path, headers, body
+- Response status code
+- Latency in milliseconds
+
+**Proxy endpoints:**
+- `GET /get_logs` - Retrieve all logged requests as JSON
+- `POST /clear_logs` - Clear all logged requests
+
+## Load Testing
+
+The project includes a comprehensive load testing framework in the `testing/` directory:
+
+**Files:**
+- `proxy_server.py` - Logging proxy for API call monitoring
+- `load_test.py` - Automated load test script
+- `requirements.txt` - Combined dependencies for both tools
+
+**Load Test Features:**
+- Automated container management (start/stop test profile)
+- Configurable RPS and duration
+- Random currency pair generation
+- Real-time progress reporting every 30 seconds
+- Comprehensive statistics from proxy logs
+- Automatic cleanup after completion
+
+**Example Output:**
+```
+Starting load test: 50 RPS for 5.0 minutes
+Start time: 14:30:00
+Expected end time: 14:35:00
+
+[14:30:30] Progress: 10.0%
+  Forex requests: 1500 (success: 1498, errors: 2)
+  One-Frame calls: 3 (0.30% of daily limit)
+  Time remaining: 4.5min (end: 14:35:00)
+  Actual RPS: 49.8
+
+=============================================================
+LOAD TEST SUMMARY
+=============================================================
+Отправлено запросов к forex: 15000
+Успешных (код 200): 14995
+Ошибок: 5
+Запросов к one-frame: 288
+% от дневного лимита: 28.80%
+```
+
 ### Local Development
 ```bash
 # Using local config
@@ -361,6 +439,18 @@ sbt -Dconfig.resource=application-local.conf run
 
 # Testing
 sbt test
+
+# Testing with proxy monitoring
+docker-compose --profile test up
+curl "http://localhost:8087/rates?from=USD&to=EUR"
+curl "http://localhost:8088/get_logs"
+
+# Load testing
+cd testing
+pip install -r requirements.txt
+./load_test.py --rps 50 --duration 5  # 50 RPS for 5 minutes
+./load_test.py                         # default: 10 RPS for 10 minutes
+cd ..
 ```
 
 ## Error Handling

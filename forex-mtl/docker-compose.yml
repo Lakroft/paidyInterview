@@ -1,11 +1,12 @@
-version: '3.8'
-
 services:
   one-frame:
     image: paidyinc/one-frame
     ports:
       - "8086:8080"
     restart: unless-stopped
+    profiles:
+      - default
+      - test
 
   forex-mtl:
     build: .
@@ -21,3 +22,39 @@ services:
     depends_on:
       - one-frame
     restart: unless-stopped
+    profiles:
+      - default
+
+  forex-mtl-test:
+    build: .
+    ports:
+      - "8087:8080"
+    environment:
+      - HTTP_HOST=0.0.0.0
+      - HTTP_PORT=8080
+      - ONEFRAME_URL=http://proxy:8088/rates?
+      - ONEFRAME_TOKEN=10dc303535874aeccc86a8251e6992f5
+      - ONEFRAME_TIME_TOLERANCE=10s
+      - CACHE_TTL=5m
+    depends_on:
+      - proxy
+    restart: "no"
+    profiles:
+      - test
+
+  proxy:
+    image: python:3.11-slim
+    ports:
+      - "8088:8088"
+    environment:
+      - TARGET_URL=http://one-frame:8080
+      - PROXY_PORT=8088
+    volumes:
+      - ./testing:/app
+    working_dir: /app
+    command: bash -c "pip install -r requirements.txt && python proxy_server.py"
+    depends_on:
+      - one-frame
+    restart: "no"
+    profiles:
+      - test
