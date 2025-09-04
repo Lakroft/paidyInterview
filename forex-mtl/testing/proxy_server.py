@@ -30,7 +30,7 @@ PROXY_PORT = int(os.environ.get('PROXY_PORT', '8088'))
 request_logs: List[Dict[str, Any]] = []
 
 def log_request(method: str, path: str, headers: dict, body: str, 
-                status_code: int, latency_ms: float) -> None:
+                status_code: int, latency_ms: float, response_body: str = '') -> None:
     """Log request details to memory storage."""
     log_entry = {
         'timestamp': datetime.utcnow().isoformat() + 'Z',
@@ -39,10 +39,13 @@ def log_request(method: str, path: str, headers: dict, body: str,
         'headers': dict(headers),
         'body': body,
         'status_code': status_code,
-        'latency_ms': round(latency_ms, 2)
+        'latency_ms': round(latency_ms, 2),
+        'response_body': response_body
     }
     request_logs.append(log_entry)
     print(f"[{log_entry['timestamp']}] {method} {path} -> {status_code} ({latency_ms:.2f}ms)")
+    if response_body and status_code != 200:
+        print(f"  Response: {response_body[:200]}...")
 
 @app.route('/get_logs', methods=['GET'])
 def get_logs():
@@ -106,6 +109,9 @@ def proxy(path):
         # Calculate latency
         latency_ms = (time.time() - start_time) * 1000
         
+        # Get response body for logging
+        response_body = response.text if hasattr(response, 'text') else str(response.content)
+        
         # Log the request
         log_request(
             method=request.method,
@@ -113,7 +119,8 @@ def proxy(path):
             headers=dict(request.headers),
             body=body,
             status_code=response.status_code,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            response_body=response_body
         )
         
         # Return response
@@ -134,7 +141,8 @@ def proxy(path):
             headers=dict(request.headers),
             body=body,
             status_code=502,  # Bad Gateway
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            response_body=str(e)
         )
         
         return jsonify({

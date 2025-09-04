@@ -408,7 +408,18 @@ The project includes a comprehensive load testing framework in the `testing/` di
 - Random currency pair generation
 - Real-time progress reporting every 30 seconds
 - Comprehensive statistics from proxy logs
+- **Visual reports with charts and graphs**
+- **HTML report with latency analysis**
+- **Timestamped report directories**
 - Automatic cleanup after completion
+
+**Generated Reports:**
+- `report.html` - Main HTML report with all visualizations
+- `request_timeline.png` - Timeline of forex and one-frame requests
+- `latency_analysis.png` - Latency distribution and timeline
+- `summary_charts.png` - Success rates, quota usage, currency pairs
+- `proxy_logs.json` - Raw proxy data
+- `test_config.json` - Test configuration and summary
 
 **Example Output:**
 ```
@@ -445,12 +456,14 @@ docker-compose --profile test up
 curl "http://localhost:8087/rates?from=USD&to=EUR"
 curl "http://localhost:8088/get_logs"
 
-# Load testing
+# Load testing with reports
 cd testing
 pip install -r requirements.txt
 ./load_test.py --rps 50 --duration 5  # 50 RPS for 5 minutes
 ./load_test.py                         # default: 10 RPS for 10 minutes
 cd ..
+
+# Reports will be saved to: target/load_test/{YYYYMMDD_HHMMSS}/
 ```
 
 ## Error Handling

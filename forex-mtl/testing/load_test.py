@@ -16,6 +16,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
+from report_generator import LoadTestReporter
 
 # Supported currencies (same as in Scala code)
 CURRENCIES = ['AUD', 'CAD', 'CHF', 'EUR', 'GBP', 'JPY', 'NZD', 'SGD', 'USD']
@@ -23,6 +24,7 @@ CURRENCIES = ['AUD', 'CAD', 'CHF', 'EUR', 'GBP', 'JPY', 'NZD', 'SGD', 'USD']
 class LoadTester:
     def __init__(self, rps: int, duration_minutes: int):
         self.rps = rps
+        self.duration_minutes = duration_minutes
         self.duration_seconds = duration_minutes * 60
         self.forex_url = "http://localhost:8087"
         self.proxy_url = "http://localhost:8088"
@@ -32,6 +34,7 @@ class LoadTester:
         self.successful_requests = 0
         self.failed_requests = 0
         self.start_time = None
+        self.start_datetime = None
         
     async def start_containers(self) -> bool:
         """Start test containers and wait for readiness."""
@@ -110,9 +113,9 @@ class LoadTester:
         print(f"Starting load test: {self.rps} RPS for {self.duration_seconds/60:.1f} minutes")
         
         # Calculate and show expected end time
-        start_datetime = datetime.now()
-        end_datetime = start_datetime + timedelta(seconds=self.duration_seconds)
-        print(f"Start time: {start_datetime.strftime('%H:%M:%S')}")
+        self.start_datetime = datetime.now()
+        end_datetime = self.start_datetime + timedelta(seconds=self.duration_seconds)
+        print(f"Start time: {self.start_datetime.strftime('%H:%M:%S')}")
         print(f"Expected end time: {end_datetime.strftime('%H:%M:%S')}")
         
         
@@ -230,6 +233,26 @@ class LoadTester:
                 for log in proxy_stats['logs'][-3:]:
                     print(f"  {log['timestamp']} {log['method']} {log['path']} -> "
                           f"{log['status_code']} ({log['latency_ms']}ms)")
+            
+            # Generate detailed report
+            print(f"\n📊 Generating detailed report...")
+            reporter = LoadTestReporter(self.start_datetime, self.duration_seconds)
+            
+            test_config = {
+                'rps': self.rps,
+                'duration_minutes': self.duration_minutes,
+                'target_url': self.forex_url,
+                'proxy_url': self.proxy_url
+            }
+            
+            forex_stats = {
+                'total_requests': self.total_requests,
+                'successful_requests': self.successful_requests,
+                'failed_requests': self.failed_requests
+            }
+            
+            report_dir = reporter.generate_full_report(forex_stats, proxy_stats, test_config)
+            print(f"📄 Report saved to: {report_dir}/report.html")
             
         finally:
             self.stop_containers()
