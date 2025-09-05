@@ -1,8 +1,11 @@
 package forex.services.rates.interpreters
 
+import cats.effect.concurrent.Ref
 import cats.effect.{Clock, ConcurrentEffect}
 import cats.syntax.either._
 import cats.syntax.flatMap._
+import cats.syntax.functor._
+import cats.syntax.apply._
 import forex.config.{CacheConfig, OneFrameConfig}
 import forex.domain.{Currency, Rate}
 import forex.services.rates.errors.Error.{InvalidCurrencyPair, RateNotFound}
@@ -14,7 +17,8 @@ import scala.concurrent.ExecutionContext
 
 class CachedOneFrame[F[_]: ConcurrentEffect](
     client: Algebra[F],
-    cache: RateCache[F]
+    cache: RateCache[F],
+    loadingRef: Ref[F, Boolean]
 ) extends Algebra[F] {
 
   private val logger = LoggerFactory.getLogger(classOf[CachedOneFrame[F]])
@@ -45,14 +49,46 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
         logger.debug(s"Cache HIT for ${pair.from}${pair.to} (unsynchronized read)")
         ConcurrentEffect[F].pure(cachedRate.asRight[Error])
       case None =>
-        this.synchronized {
-          cache.get(pair).flatMap {
-            case Some(cachedRate) =>
-              logger.debug(s"Cache HIT for ${pair.from}${pair.to} (synchronized double-check)")
-              ConcurrentEffect[F].pure(cachedRate.asRight[Error])
-            case None =>
-              logger.debug(s"Cache MISS for ${pair.from}${pair.to} (confirmed after double-check)")
-              performBatchAPICall(pair)
+        loadingRef.get.flatMap { isLoading =>
+          if (isLoading) {
+            // Another thread is loading - wait and then check cache again
+            logger.debug(s"Another thread is loading cache for ${pair.from}${pair.to} - waiting")
+            ConcurrentEffect[F].delay(Thread.sleep(10)) *> // Small delay
+            cache.get(pair).flatMap {
+              case Some(cachedRate) =>
+                logger.debug(s"Cache HIT for ${pair.from}${pair.to} (after waiting)")
+                ConcurrentEffect[F].pure(cachedRate.asRight[Error])
+              case None =>
+                // Still no cache, try again (with reasonable limit)
+                getCurrencyRate(pair)
+            }
+          } else {
+            // Try to acquire loading lock
+            loadingRef.modify { current =>
+              if (current) {
+                // Someone else is already loading
+                (current, false) // Don't change state, return false
+              } else {
+                // Acquire the lock
+                (true, true) // Set loading to true, return true
+              }
+            }.flatMap { acquired =>
+              if (acquired) {
+                // We acquired the lock - double check cache and load if needed
+                cache.get(pair).flatMap {
+                  case Some(cachedRate) =>
+                    // Cache appeared while we were acquiring lock
+                    loadingRef.set(false).map(_ => cachedRate.asRight[Error])
+                  case None =>
+                    logger.debug(s"Cache MISS for ${pair.from}${pair.to} - performing batch API call")
+                    performBatchAPICall(pair).flatTap(_ => loadingRef.set(false))
+                }
+              } else {
+                // Someone else got the lock, wait and retry
+                logger.debug(s"Failed to acquire lock for ${pair.from}${pair.to} - retrying")
+                getCurrencyRate(pair)
+              }
+            }
           }
         }
     }
@@ -87,9 +123,11 @@ object CachedOneFrame {
   def apply[F[_]: ConcurrentEffect: Clock](
       oneFrameConfig: OneFrameConfig, 
       cacheConfig: CacheConfig
-  )(implicit ec: ExecutionContext): CachedOneFrame[F] = {
-    val client = new OneFrameClient[F](oneFrameConfig)
-    val cache = new RateCache[F](cacheConfig)
-    new CachedOneFrame[F](client, cache)
+  )(implicit ec: ExecutionContext): F[CachedOneFrame[F]] = {
+    for {
+      loadingRef <- Ref.of[F, Boolean](false)
+      client = new OneFrameClient[F](oneFrameConfig)
+      cache = new RateCache[F](cacheConfig)
+    } yield new CachedOneFrame[F](client, cache, loadingRef)
   }
 }

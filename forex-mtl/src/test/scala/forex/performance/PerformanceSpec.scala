@@ -1,6 +1,7 @@
 package forex.performance
 
 import cats.effect.{ContextShift, IO, Timer}
+import cats.effect.concurrent.Ref
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import forex.config.CacheConfig
@@ -16,6 +17,12 @@ import scala.concurrent.duration._
 class PerformanceSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
   implicit val timer: Timer[IO] = IO.timer(global)
+  
+  // Helper function to create CachedOneFrame instance for tests
+  private def createCachedOneFrame(mockClient: forex.services.rates.Algebra[IO], cache: RateCache[IO]): CachedOneFrame[IO] = {
+    val loadingRef = Ref.of[IO, Boolean](false).unsafeRunSync()
+    new CachedOneFrame[IO](mockClient, cache, loadingRef)
+  }
 
   "CachedOneFrame Performance" should "handle 1000 requests efficiently with caching" in {
     val testClock = new TestClock[IO]
@@ -23,7 +30,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     val requestCount = 1000
@@ -43,7 +50,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),
@@ -74,7 +81,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     // Create many different pairs to test memory usage
     val currencies = Currency.allCurrencies.toList
@@ -101,7 +108,7 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),

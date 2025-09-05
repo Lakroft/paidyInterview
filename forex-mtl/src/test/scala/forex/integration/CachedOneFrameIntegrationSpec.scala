@@ -1,6 +1,7 @@
 package forex.integration
 
 import cats.effect.{ContextShift, IO, Timer}
+import cats.effect.concurrent.Ref
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import forex.config.CacheConfig
@@ -16,12 +17,18 @@ import scala.concurrent.duration._
 class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
   implicit val timer: Timer[IO] = IO.timer(global)
+  
+  // Helper function to create CachedOneFrame instance for tests
+  private def createCachedOneFrame(mockClient: forex.services.rates.Algebra[IO], cache: RateCache[IO]): CachedOneFrame[IO] = {
+    val loadingRef = Ref.of[IO, Boolean](false).unsafeRunSync()
+    new CachedOneFrame[IO](mockClient, cache, loadingRef)
+  }
 
   "CachedOneFrame Integration" should "optimize API calls with batching" in {
     val testClock = TestClock[IO]
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(2.seconds))(implicitly, testClock)
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),
@@ -62,7 +69,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "cache all pairs when any cache miss occurs" in {
     val mockClient = new MockAlgebra[IO]
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val firstPair = Rate.Pair(Currency.USD, Currency.EUR)
     val secondPair = Rate.Pair(Currency.JPY, Currency.USD)
@@ -85,7 +92,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "recover from API failures and retry successfully" in {
     val mockClient = new MockAlgebra[IO]
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -105,7 +112,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "maintain performance under concurrent load" in {
     val mockClient = new MockAlgebra[IO]
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -125,7 +132,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
   it should "handle cache invalidation scenarios" in {
     val mockClient = new MockAlgebra[IO]
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -146,7 +153,7 @@ class CachedOneFrameIntegrationSpec extends AnyFlatSpec with Matchers {
     val testClock = TestClock[IO]
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(2.seconds))(implicitly, testClock)
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),

@@ -12,7 +12,13 @@ import scala.concurrent.ExecutionContext
 
 class Module[F[_]: Timer: ConcurrentEffect: Clock](config: ApplicationConfig)(implicit ec: ExecutionContext) {
 
-  private val ratesService: RatesService[F] = RatesServices.cachedOneFrame[F](config.oneFrame, config.cache)
+  private val ratesServiceF: F[RatesService[F]] = RatesServices.cachedOneFrame[F](config.oneFrame, config.cache)
+  
+  // For simplicity, we'll use unsafeRunSync here since Module is initialized once at startup
+  private val ratesService: RatesService[F] = {
+    import cats.effect.IO
+    ratesServiceF.asInstanceOf[IO[RatesService[F]]].unsafeRunSync()
+  }
 
   private val ratesProgram: RatesProgram[F] = RatesProgram[F](ratesService)
 

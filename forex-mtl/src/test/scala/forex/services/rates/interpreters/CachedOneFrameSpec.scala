@@ -1,6 +1,7 @@
 package forex.services.rates.interpreters
 
 import cats.effect.{ContextShift, IO, Timer}
+import cats.effect.concurrent.Ref
 
 import scala.concurrent.ExecutionContext.Implicits.global
 import forex.config.CacheConfig
@@ -16,6 +17,12 @@ import scala.concurrent.duration._
 class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
   implicit val timer: Timer[IO] = IO.timer(global)
+  
+  // Helper function to create CachedOneFrame instance for tests
+  private def createCachedOneFrame(mockClient: forex.services.rates.Algebra[IO], cache: RateCache[IO]): CachedOneFrame[IO] = {
+    val loadingRef = Ref.of[IO, Boolean](false).unsafeRunSync()
+    new CachedOneFrame[IO](mockClient, cache, loadingRef)
+  }
 
   "CachedOneFrame" should "return cached rate when available" in {
     val testClock = new TestClock[IO]
@@ -23,7 +30,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val rate = TestData.createTestRateWithClock(Currency.USD, Currency.EUR, testClock)
     cache.put(rate).unsafeRunSync()
@@ -40,7 +47,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
     val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
@@ -75,7 +82,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -92,7 +99,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
     val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
@@ -125,7 +132,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -153,7 +160,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -176,7 +183,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
       }
     }
     val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -202,7 +209,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
@@ -224,7 +231,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     val samePair = Rate.Pair(Currency.USD, Currency.USD)
     
@@ -243,7 +250,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
     val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = new CachedOneFrame[IO](mockClient, cache)
+    val service = createCachedOneFrame(mockClient, cache)
     
     // Try to get invalid pair
     service.get(Rate.Pair(Currency.EUR, Currency.EUR)).unsafeRunSync()
