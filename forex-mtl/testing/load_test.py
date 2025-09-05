@@ -36,6 +36,26 @@ class LoadTester:
         self.start_time = None
         self.start_datetime = None
         
+        # Error logging
+        self.forex_errors = []
+    
+    def log_forex_error(self, url: str, status_code: int, response_text: str = '', exception: str = '') -> None:
+        """Log forex request error to memory."""
+        error_entry = {
+            'timestamp': datetime.now().isoformat(),
+            'url': url,
+            'status_code': status_code,
+            'response_text': response_text,
+            'exception': exception
+        }
+        self.forex_errors.append(error_entry)
+        
+        current_time = datetime.now().strftime('%H:%M:%S')
+        if exception:
+            print(f"[{current_time}] Forex request failed: {exception[:200]}")
+        else:
+            print(f"[{current_time}] Forex error {status_code}: {response_text[:200]}")
+        
     async def start_containers(self) -> bool:
         """Start test containers and wait for readiness."""
         print("Starting test containers...")
@@ -104,9 +124,16 @@ class LoadTester:
                     self.successful_requests += 1
                 else:
                     self.failed_requests += 1
+                    # Log forex errors
+                    try:
+                        response_text = await response.text()
+                        self.log_forex_error(url, response.status, response_text)
+                    except:
+                        self.log_forex_error(url, response.status, '(could not read response)')
         except Exception as e:
             self.total_requests += 1
             self.failed_requests += 1
+            self.log_forex_error(url, 0, '', str(e))
             
     async def run_load_test(self) -> None:
         """Run the load test with specified RPS and duration."""
@@ -248,7 +275,8 @@ class LoadTester:
             forex_stats = {
                 'total_requests': self.total_requests,
                 'successful_requests': self.successful_requests,
-                'failed_requests': self.failed_requests
+                'failed_requests': self.failed_requests,
+                'errors': self.forex_errors
             }
             
             report_dir = reporter.generate_full_report(forex_stats, proxy_stats, test_config)

@@ -490,6 +490,7 @@ class LoadTestReporter:
         <h2>🔧 Raw Data</h2>
         <p>Raw proxy logs: <a href="proxy_logs.json">proxy_logs.json</a></p>
         <p>Test configuration: <a href="test_config.json">test_config.json</a></p>
+        {f'<p>Forex errors: <a href="forex_errors.json">forex_errors.json</a> ({len(forex_stats.get("errors", []))} errors)</p>' if forex_stats.get("errors") else ''}
     </div>
     
 </body>
@@ -507,6 +508,14 @@ class LoadTestReporter:
         # Save proxy logs
         with open(os.path.join(self.report_dir, 'proxy_logs.json'), 'w') as f:
             json.dump(proxy_stats, f, indent=2)
+        
+        # Save forex errors
+        if forex_stats.get('errors'):
+            with open(os.path.join(self.report_dir, 'forex_errors.json'), 'w') as f:
+                json.dump({
+                    'total_errors': len(forex_stats['errors']),
+                    'errors': forex_stats['errors']
+                }, f, indent=2)
         
         # Save test configuration and results
         test_data = {
