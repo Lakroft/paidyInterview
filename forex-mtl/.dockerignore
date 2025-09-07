@@ -1,0 +1,30 @@
+# Target directories
+target/
+project/target/
+project/project/target/
+
+# IDE files
+.idea/
+*.iml
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Temp files
+*.log
+*.tmp
+tempDoNotCommit.txt
+
+# Docker files (not needed inside container)
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation
+README.md

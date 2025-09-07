@@ -13,7 +13,7 @@ object Config {
    */
   def stream[F[_]: Sync](path: String): Stream[F, ApplicationConfig] = {
     Stream.eval(Sync[F].delay(
-      ConfigSource.default.at(path).loadOrThrow[ApplicationConfig]))
+      ConfigSource.default.withFallback(ConfigSource.systemProperties).at(path).loadOrThrow[ApplicationConfig]))
   }
 
 }
