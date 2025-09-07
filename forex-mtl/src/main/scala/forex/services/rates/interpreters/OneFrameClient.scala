@@ -53,7 +53,7 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec
     s"${config.url}$queryString"
   }
 
-  override def getBatch(pairs: List[Rate.Pair])(implicit ev: cats.Applicative[F]): F[Error Either List[Rate]] = {
+  override def getBatch(pairs: List[Rate.Pair]): F[Error Either List[Rate]] = {
     val logInfo = (msg: String) => Sync[F].delay(logger.info(msg))
     if (pairs.isEmpty) {
       logInfo("Empty batch request, returning empty list").flatMap { _ =>

@@ -1,6 +1,5 @@
 package forex.helpers
 
-import cats.Applicative
 import cats.effect.Sync
 import cats.syntax.either._
 import forex.domain.Rate
@@ -61,7 +60,7 @@ class MockAlgebra[F[_]: Sync](testClock: Option[TestClock[F]] = None) extends Al
     }
   }
   
-  override def getBatch(pairs: List[Rate.Pair])(implicit F: Applicative[F]): F[Error Either List[Rate]] = {
+  override def getBatch(pairs: List[Rate.Pair]): F[Error Either List[Rate]] = {
     _batchCallCount += 1
     _batchCalledPairs += pairs
     

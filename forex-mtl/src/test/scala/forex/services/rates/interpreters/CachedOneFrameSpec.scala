@@ -177,7 +177,7 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock)) {
-      override def getBatch(pairs: List[Rate.Pair])(implicit F: cats.Applicative[IO]) = {
+      override def getBatch(pairs: List[Rate.Pair]) = {
         // Return empty list instead of expected rates
         IO.pure(Right(List.empty[Rate]))
       }

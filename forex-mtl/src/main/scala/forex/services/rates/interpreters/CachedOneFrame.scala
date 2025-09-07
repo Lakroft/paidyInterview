@@ -2,10 +2,7 @@ package forex.services.rates.interpreters
 
 import cats.effect.concurrent.Ref
 import cats.effect.{Clock, ConcurrentEffect}
-import cats.syntax.either._
-import cats.syntax.flatMap._
-import cats.syntax.functor._
-import cats.syntax.apply._
+import cats.implicits._
 import forex.config.{CacheConfig, OneFrameConfig}
 import forex.domain.{Currency, Rate}
 import forex.services.rates.errors.Error.{InvalidCurrencyPair, RateNotFound}
@@ -115,6 +112,29 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
           logger.error(s"Batch API call failed: $error")
           ConcurrentEffect[F].pure(error.asLeft[Rate])
       }
+  }
+
+  override def getBatch(pairs: List[Rate.Pair]): F[Error Either List[Rate]] = {
+    if (pairs.isEmpty) {
+      ConcurrentEffect[F].pure(List.empty[Rate].asRight[Error])
+    } else {
+      // Validate all pairs first
+      val validationResults = pairs.map(validateCurrencyPair)
+      val errors = validationResults.collect { case Left(error) => error }
+      
+      if (errors.nonEmpty) {
+        // Return first validation error
+        ConcurrentEffect[F].pure(errors.head.asLeft[List[Rate]])
+      } else {
+        val validatedPairs = validationResults.collect { case Right(pair) => pair }
+        
+        // Get rates for all valid pairs using sequence to collect results
+        validatedPairs.traverse(getCurrencyRate).map { results =>
+          // Convert List[Either[Error, Rate]] to Either[Error, List[Rate]]
+          results.sequence
+        }
+      }
+    }
   }
 
 }
