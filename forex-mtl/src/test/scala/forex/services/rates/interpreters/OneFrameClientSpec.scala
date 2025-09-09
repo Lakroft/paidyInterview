@@ -5,9 +5,10 @@ import cats.effect.{ContextShift, IO, Timer}
 import scala.concurrent.ExecutionContext.Implicits.global
 import forex.config.OneFrameConfig
 import forex.domain.{Currency, Rate}
-import forex.services.rates.errors.Error._
+import forex.services.rates.errors.Error.NetworkError
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
+
 import scala.concurrent.duration._
 
 class OneFrameClientSpec extends AnyFlatSpec with Matchers {
@@ -16,7 +17,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
 
   "OneFrameClient" should "build correct URL for single pair" in {
     val config = OneFrameConfig("http://api.example.com/rates?", "test-token", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
 
     val url = client.buildBatchUrl(List(pair))
@@ -25,7 +26,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   
   it should "build correct URL for multiple pairs" in {
     val config = OneFrameConfig("http://api.example.com/rates?", "secret-key", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     val pairs = List(
       Rate.Pair(Currency.USD, Currency.EUR),
       Rate.Pair(Currency.JPY, Currency.USD),
@@ -38,7 +39,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   
   it should "handle special characters in base URL" in {
     val config = OneFrameConfig("http://api.example.com:8080/api/v1/rates?", "token123", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     val pairs = List(Rate.Pair(Currency.CHF, Currency.SGD))
     
     val url = client.buildBatchUrl(pairs)
@@ -47,7 +48,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   
   it should "build URL for empty pair list" in {
     val config = OneFrameConfig("http://test.com/rates?", "test-token", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     
     val url = client.buildBatchUrl(List.empty)
     url shouldBe "http://test.com/rates?"
@@ -55,7 +56,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   
   it should "handle empty batch request" in {
     val config = OneFrameConfig("http://test.com/rates?", "test-token", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     
     val result = client.getBatch(List.empty).unsafeRunSync()
     
@@ -66,7 +67,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   it should "handle invalid URL configuration" in {
     // Use invalid protocol to trigger connection error
     val config = OneFrameConfig("invalid-protocol://test.com/rates?", "test-token", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     val pairs = List(Rate.Pair(Currency.USD, Currency.EUR))
     
     val result = client.getBatch(pairs).unsafeRunSync()
@@ -81,7 +82,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   it should "properly map single pair failures to get() method" in {
     // Test that single pair method correctly handles batch failures
     val config = OneFrameConfig("invalid://bad-url", "test-token", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
     val result = client.get(pair).unsafeRunSync()
@@ -95,7 +96,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   it should "handle empty batch response correctly in get() method" in {
     // This would require mocking, but we can test the URL building at least
     val config = OneFrameConfig("http://test.com/rates?", "test-token", 30.seconds) 
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     
     // Test URL generation works correctly for edge cases
     val singlePairUrl = client.buildBatchUrl(List(Rate.Pair(Currency.USD, Currency.USD)))
@@ -105,7 +106,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   // Test error message patterns from actual OneFrameClient error handling
   it should "create appropriate error messages for different failure scenarios" in {
     val config = OneFrameConfig("http://test.com/rates?", "test-token", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     
     // Test URL building works for various scenarios
     val multiPairUrl = client.buildBatchUrl(List(
@@ -122,7 +123,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
 
   it should "handle edge case currency combinations in URL building" in {
     val config = OneFrameConfig("https://api.example.com:8443/v2/rates?", "secret123", 30.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     
     // Test various currency combinations
     val pairs = List(
@@ -136,7 +137,7 @@ class OneFrameClientSpec extends AnyFlatSpec with Matchers {
   
   it should "handle time synchronization checks without throwing exceptions" in {
     val config = OneFrameConfig("http://test.com/rates?", "test-token", 10.seconds)
-    val client = new OneFrameClient[IO](config)
+    val client = OneFrameClient[IO](config)
     
     // Test various timestamp scenarios - should not throw exceptions
     val validTimestamp = java.time.OffsetDateTime.now().toString

@@ -3,27 +3,24 @@ package forex.services.rates
 import cats.effect.{ContextShift, IO, Timer}
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import forex.config.CacheConfig
 import forex.domain.{Currency, Rate}
-import forex.helpers.{TestClock, TestData}
+import forex.helpers.TestData
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
-
-import scala.concurrent.duration._
 
 class RateCacheSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
   implicit val timer: Timer[IO] = IO.timer(global)
 
   "RateCache" should "return None for non-existent pairs" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
     cache.get(pair).unsafeRunSync() shouldBe None
   }
   
   it should "return cached rate when available and not expired" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val rate = TestData.createTestRate(Currency.USD, Currency.EUR, 1.23)
     
     cache.put(rate).unsafeRunSync()
@@ -33,7 +30,7 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "return all cached pairs" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val rate1 = TestData.createTestRate(Currency.USD, Currency.EUR)
     val rate2 = TestData.createTestRate(Currency.JPY, Currency.USD)
     
@@ -45,34 +42,35 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
     cachedPairs should contain(rate2.pair)
   }
   
-  it should "expire rates after TTL" in {
-    val testClock = TestClock[IO]
-    val cache = new RateCache[IO](CacheConfig(2.seconds))(implicitly, testClock)
-    val rate = TestData.createTestRate(Currency.USD, Currency.EUR)
+  it should "maintain rates until explicitly replaced" in {
+    val cache = new RateCache[IO]()
+    val rate1 = TestData.createTestRate(Currency.USD, Currency.EUR, 1.20)
+    val rate2 = TestData.createTestRate(Currency.USD, Currency.EUR, 1.25)
     
-    cache.put(rate).unsafeRunSync()
-    cache.get(rate.pair).unsafeRunSync() shouldBe Some(rate)
+    cache.put(rate1).unsafeRunSync()
+    cache.get(rate1.pair).unsafeRunSync() shouldBe Some(rate1)
     
-    testClock.advance(3.seconds)
-    cache.get(rate.pair).unsafeRunSync() shouldBe None
+    // Rate should persist until explicitly replaced
+    cache.put(rate2).unsafeRunSync()
+    cache.get(rate1.pair).unsafeRunSync() shouldBe Some(rate2)
   }
   
   it should "return empty list when no pairs are cached" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     
     val cachedPairs = cache.getAllCachedPairs.unsafeRunSync()
     cachedPairs shouldBe List.empty
   }
   
   it should "cache multiple rates in batch" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val rates = List(
       TestData.createTestRate(Currency.USD, Currency.EUR, 1.1),
       TestData.createTestRate(Currency.JPY, Currency.USD, 0.007),
       TestData.createTestRate(Currency.GBP, Currency.EUR, 1.15)
     )
     
-    cache.putBatch(rates).unsafeRunSync()
+    cache.replaceCache(rates).unsafeRunSync()
     
     rates.foreach { rate =>
       cache.get(rate.pair).unsafeRunSync() shouldBe Some(rate)
@@ -80,7 +78,7 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
   }
   
   it should "clear all cached data" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val rate = TestData.createTestRate(Currency.USD, Currency.EUR)
     
     cache.put(rate).unsafeRunSync()
@@ -91,8 +89,8 @@ class RateCacheSpec extends AnyFlatSpec with Matchers {
     cache.getAllCachedPairs.unsafeRunSync() shouldBe List.empty
   }
   
-  it should "use putBatch for single put operation" in {
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+  it should "use replaceCache for batch operations" in {
+    val cache = new RateCache[IO]()
     val rate = TestData.createTestRate(Currency.USD, Currency.EUR)
     
     cache.put(rate).unsafeRunSync()

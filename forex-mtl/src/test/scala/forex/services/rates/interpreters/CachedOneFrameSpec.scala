@@ -1,10 +1,8 @@
 package forex.services.rates.interpreters
 
 import cats.effect.{ContextShift, IO, Timer}
-import cats.effect.concurrent.Ref
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import forex.config.CacheConfig
 import forex.domain.{Currency, Rate}
 import forex.helpers.{MockAlgebra, TestClock, TestData}
 import forex.services.rates.RateCache
@@ -12,24 +10,20 @@ import forex.services.rates.errors.Error.{InvalidCurrencyPair, OneFrameLookupFai
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.duration._
-
 class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
   implicit val timer: Timer[IO] = IO.timer(global)
   
   // Helper function to create CachedOneFrame instance for tests
   private def createCachedOneFrame(mockClient: forex.services.rates.Algebra[IO], cache: RateCache[IO]): CachedOneFrame[IO] = {
-    val loadingRef = Ref.of[IO, Boolean](false).unsafeRunSync()
-    new CachedOneFrame[IO](mockClient, cache, loadingRef)
+    new CachedOneFrame[IO](mockClient, cache)
   }
 
   "CachedOneFrame" should "return cached rate when available" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val rate = TestData.createTestRateWithClock(Currency.USD, Currency.EUR, testClock)
@@ -41,140 +35,135 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     mockClient.batchCallCount shouldBe 0
   }
   
-  it should "make batch request when expired tracked pairs exist" in {
+  it should "return RateNotFound when cache is empty" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = createCachedOneFrame(mockClient, cache)
-    
-    val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
-    val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
-    val rate1 = TestData.createTestRateWithClock(pair1.from, pair1.to, testClock)
-    val rate2 = TestData.createTestRateWithClock(pair2.from, pair2.to, testClock)
-    
-    // Track pairs by requesting them
-    cache.get(pair1).unsafeRunSync()
-    cache.get(pair2).unsafeRunSync()
-    
-    // Cache rates
-    cache.put(rate1).unsafeRunSync()
-    cache.put(rate2).unsafeRunSync()
-    
-    // Advance time to expire rates
-    testClock.advance(10.seconds)
-    
-    // Setup mock expectation - now expects all supported pairs
-    import forex.domain.Currency
-    val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }
-    mockClient.expectBatchCall(allSupportedPairs)
-    
-    val result = service.get(pair1).unsafeRunSync()
-    
-    result.isRight shouldBe true
-    mockClient.verifyBatchCalled()
-  }
-  
-  it should "make single request when no expired tracked pairs exist" in {
-    val testClock = new TestClock[IO]
-    implicit val clock = testClock
-    
-    val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
+    // Request from empty cache should return RateNotFound
     val result = service.get(pair).unsafeRunSync()
     
-    result.isRight shouldBe true
+    result.isLeft shouldBe true
+    result.left.getOrElse(fail()) shouldBe RateNotFound("USDEUR")
+    
+    // Should not make any API calls for user requests
+    mockClient.batchCallCount shouldBe 0
+  }
+  
+  it should "serve from cache when refreshCache has populated it" in {
+    val testClock = new TestClock[IO]
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO]()
+    val service = createCachedOneFrame(mockClient, cache)
+    
+    val pair = Rate.Pair(Currency.USD, Currency.EUR)
+    
+    // Initially should return RateNotFound
+    service.get(pair).unsafeRunSync().isLeft shouldBe true
+    
+    // Populate cache using refreshCache
+    service.refreshCache().unsafeRunSync()
     mockClient.batchCallCount shouldBe 1
-    mockClient.batchCalledPairs.flatten should contain(pair)
+    
+    // Reset mock to track subsequent calls
+    mockClient.reset()
+    
+    // Now user request should succeed from cache
+    val result = service.get(pair).unsafeRunSync()
+    result.isRight shouldBe true
+    
+    // Should not make additional API calls
+    mockClient.batchCallCount shouldBe 0
   }
   
-  it should "cache rates from batch response" in {
+  it should "cache all supported pairs from refreshCache" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.seconds))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pair1 = Rate.Pair(Currency.USD, Currency.EUR)
     val pair2 = Rate.Pair(Currency.JPY, Currency.USD)
     
-    // Track pairs
-    cache.get(pair1).unsafeRunSync()
-    cache.get(pair2).unsafeRunSync()
+    // Initially both pairs should return RateNotFound
+    service.get(pair1).unsafeRunSync().isLeft shouldBe true
+    service.get(pair2).unsafeRunSync().isLeft shouldBe true
     
-    // Create rates and then expire them by advancing time
-    val rate1 = TestData.createTestRateWithClock(pair1.from, pair1.to, testClock)
-    val rate2 = TestData.createTestRateWithClock(pair2.from, pair2.to, testClock)
-    cache.put(rate1).unsafeRunSync()
-    cache.put(rate2).unsafeRunSync()
+    // Use refreshCache to populate all supported pairs
+    service.refreshCache().unsafeRunSync()
+    mockClient.batchCallCount shouldBe 1
     
-    // Advance time to expire rates (TTL is 5.seconds)
-    testClock.advance(10.seconds)
+    // Now both rates should be available from cache
+    val result1 = service.get(pair1).unsafeRunSync()
+    val result2 = service.get(pair2).unsafeRunSync()
     
-    val result = service.get(pair1).unsafeRunSync()
+    result1.isRight shouldBe true
+    result2.isRight shouldBe true
     
+    // All supported pairs should be cached
+    import forex.domain.Currency
+    val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }.toSet
+    cache.getAllCachedPairs.unsafeRunSync().toSet shouldBe allSupportedPairs
+  }
+  
+  it should "handle refreshCache API failures gracefully" in {
+    val testClock = new TestClock[IO]
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO]()
+    val service = createCachedOneFrame(mockClient, cache)
+    
+    val pair = Rate.Pair(Currency.USD, Currency.EUR)
+    
+    // Simulate API failure during refreshCache
+    mockClient.setBatchShouldFail(true)
+    
+    val refreshResult = service.refreshCache().unsafeRunSync()
+    refreshResult.isLeft shouldBe true
+    refreshResult.left.getOrElse(fail()) shouldBe a[OneFrameLookupFailed]
+    
+    // User request should return RateNotFound since cache is still empty
+    val result = service.get(pair).unsafeRunSync()
+    result.isLeft shouldBe true
+    result.left.getOrElse(fail()) shouldBe RateNotFound("USDEUR")
+  }
+  
+  it should "demonstrate timer-based refresh pattern" in {
+    val testClock = new TestClock[IO]
+    
+    val mockClient = new MockAlgebra[IO](Some(testClock))
+    val cache = new RateCache[IO]()
+    val service = createCachedOneFrame(mockClient, cache)
+    
+    val pair = Rate.Pair(Currency.USD, Currency.EUR)
+    
+    // Initially should return RateNotFound
+    service.get(pair).unsafeRunSync().isLeft shouldBe true
+    mockClient.batchCallCount shouldBe 0
+    
+    // Simulate timer-based refresh (this would normally be called by Main.scala timer)
+    service.refreshCache().unsafeRunSync()
+    mockClient.batchCallCount shouldBe 1
+    
+    // Now user request should succeed from cache
+    val result = service.get(pair).unsafeRunSync()
     result.isRight shouldBe true
     
-    // Both rates should now be cached from the batch response
-    cache.get(pair1).unsafeRunSync().isDefined shouldBe true
-    cache.get(pair2).unsafeRunSync().isDefined shouldBe true
+    // Additional user requests should continue to work from cache
+    service.get(pair).unsafeRunSync().isRight shouldBe true
+    
+    // Should not make additional API calls for user requests
+    mockClient.batchCallCount shouldBe 1
   }
   
-  it should "handle batch API failures gracefully" in {
+  it should "handle empty batch response in refreshCache" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
-    
-    val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.seconds))
-    val service = createCachedOneFrame(mockClient, cache)
-    
-    val pair = Rate.Pair(Currency.USD, Currency.EUR)
-    
-    // Track and expire pair
-    cache.get(pair).unsafeRunSync()
-    
-    // Create rate and expire it by advancing time
-    val rate = TestData.createTestRateWithClock(pair.from, pair.to, testClock)
-    cache.put(rate).unsafeRunSync()
-    
-    // Advance time to expire rate (TTL is 5.seconds)
-    testClock.advance(10.seconds)
-    
-    mockClient.setBatchShouldFail(true)
-    
-    val result = service.get(pair).unsafeRunSync()
-    
-    result.isLeft shouldBe true
-    result.left.getOrElse(fail()) shouldBe a[OneFrameLookupFailed]
-  }
-  
-  it should "handle single API failures gracefully" in {
-    val testClock = new TestClock[IO]
-    implicit val clock = testClock
-    
-    val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
-    val service = createCachedOneFrame(mockClient, cache)
-    
-    val pair = Rate.Pair(Currency.USD, Currency.EUR)
-    
-    mockClient.setBatchShouldFail(true)
-    
-    val result = service.get(pair).unsafeRunSync()
-    
-    result.isLeft shouldBe true
-    result.left.getOrElse(fail()) shouldBe a[OneFrameLookupFailed]
-  }
-  
-  it should "return error when requested pair not found in batch response" in {
-    val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock)) {
       override def getBatch(pairs: List[Rate.Pair]) = {
@@ -182,55 +171,49 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
         IO.pure(Right(List.empty[Rate]))
       }
     }
-    val cache = new RateCache[IO](CacheConfig(5.seconds))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
-    // Track and expire pair
-    cache.get(pair).unsafeRunSync()
+    // refreshCache with empty response should succeed but not populate cache
+    val refreshResult = service.refreshCache().unsafeRunSync()
+    refreshResult.isRight shouldBe true
     
-    // Create rate and expire it by advancing time
-    val rate = TestData.createTestRateWithClock(pair.from, pair.to, testClock)
-    cache.put(rate).unsafeRunSync()
-    
-    // Advance time to expire rate (TTL is 5.seconds)
-    testClock.advance(10.seconds)
-    
+    // User request should still return RateNotFound since cache is empty
     val result = service.get(pair).unsafeRunSync()
-    
     result.isLeft shouldBe true
     result.left.getOrElse(fail()) shouldBe RateNotFound("USDEUR")
   }
   
-  it should "cache single API response" in {
+  it should "maintain cache consistency across multiple refreshes" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     
-    val result = service.get(pair).unsafeRunSync()
+    // First refresh
+    service.refreshCache().unsafeRunSync()
+    val result1 = service.get(pair).unsafeRunSync()
+    result1.isRight shouldBe true
     
-    result.isRight shouldBe true
+    // Second refresh - should replace cache atomically
+    service.refreshCache().unsafeRunSync()
+    val result2 = service.get(pair).unsafeRunSync()
+    result2.isRight shouldBe true
     
-    // Rate should now be cached
-    val cachedResult = service.get(pair).unsafeRunSync()
-    cachedResult.isRight shouldBe true
-    
-    // Should have made only one API call
-    mockClient.batchCallCount shouldBe 1
+    // Should have made two refresh API calls
+    mockClient.batchCallCount shouldBe 2
   }
   
   it should "reject same currency pairs early" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val samePair = Rate.Pair(Currency.USD, Currency.USD)
@@ -245,15 +228,17 @@ class CachedOneFrameSpec extends AnyFlatSpec with Matchers {
     mockClient.callCount shouldBe 0
   }
   
-  it should "not add invalid pairs to tracked pairs" in {
+  it should "not process invalid pairs and not make API calls" in {
     val testClock = new TestClock[IO]
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
-    // Try to get invalid pair
-    service.get(Rate.Pair(Currency.EUR, Currency.EUR)).unsafeRunSync()
+    // Try to get invalid pair - should return InvalidCurrencyPair error
+    val result = service.get(Rate.Pair(Currency.EUR, Currency.EUR)).unsafeRunSync()
+    result.isLeft shouldBe true
+    result.left.getOrElse(fail()) shouldBe InvalidCurrencyPair("EUREUR", "same currency conversion not supported")
     
     // Should not be cached
     val cachedPairs = cache.getAllCachedPairs.unsafeRunSync()

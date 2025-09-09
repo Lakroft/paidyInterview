@@ -1,10 +1,8 @@
 package forex.performance
 
 import cats.effect.{ContextShift, IO, Timer}
-import cats.effect.concurrent.Ref
 
 import scala.concurrent.ExecutionContext.Implicits.global
-import forex.config.CacheConfig
 import forex.domain.{Currency, Rate}
 import forex.helpers.{MockAlgebra, TestClock}
 import forex.services.rates.RateCache
@@ -12,7 +10,6 @@ import forex.services.rates.interpreters.CachedOneFrame
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-import scala.concurrent.duration._
 
 class PerformanceSpec extends AnyFlatSpec with Matchers {
   implicit val cs: ContextShift[IO] = IO.contextShift(global)
@@ -20,36 +17,40 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
   
   // Helper function to create CachedOneFrame instance for tests
   private def createCachedOneFrame(mockClient: forex.services.rates.Algebra[IO], cache: RateCache[IO]): CachedOneFrame[IO] = {
-    val loadingRef = Ref.of[IO, Boolean](false).unsafeRunSync()
-    new CachedOneFrame[IO](mockClient, cache, loadingRef)
+    new CachedOneFrame[IO](mockClient, cache)
   }
 
   "CachedOneFrame Performance" should "handle 1000 requests efficiently with caching" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
-    
+
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pair = Rate.Pair(Currency.USD, Currency.EUR)
     val requestCount = 1000
+    
+    // Pre-populate cache using refreshCache
+    service.refreshCache().unsafeRunSync()
+    mockClient.batchCallCount shouldBe 1
+    
+    // Reset mock to track subsequent calls
+    mockClient.reset()
     
     // Make 1000 requests - should be fast with caching
     (1 to requestCount).foreach { _ =>
       service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
     }
     
-    // Should make only 1 API call despite 1000 requests
-    mockClient.batchCallCount shouldBe 1
+    // Should make 0 additional API calls (all from cache)
+    mockClient.batchCallCount shouldBe 0
   }
   
-  it should "efficiently batch requests for multiple pairs" in {
+  it should "efficiently serve multiple pairs from cache" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
-    
+
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.seconds))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pairs = List(
@@ -62,25 +63,27 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
       Rate.Pair(Currency.NZD, Currency.GBP)
     )
     
-    // Initial requests to track pairs
-    pairs.foreach(service.get(_).unsafeRunSync())
+    // Pre-populate cache using refreshCache
+    service.refreshCache().unsafeRunSync()
+    mockClient.batchCallCount shouldBe 1
     
-    // Expire cache by advancing time
-    testClock.advance(10.seconds)
+    // Reset mock to track subsequent calls
     mockClient.reset()
     
-    // Request all pairs - should trigger one batch call
-    pairs.foreach(service.get(_).unsafeRunSync())
+    // Request all pairs - should all come from cache
+    pairs.foreach { pair =>
+      service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
+    }
     
-    // Should make exactly 1 batch call for all pairs
-    mockClient.batchCallCount shouldBe 1
+    // Should make 0 additional API calls (all from cache)
+    mockClient.batchCallCount shouldBe 0
   }
   
   it should "maintain performance under memory pressure" in {
     val testClock = new TestClock[IO]
     
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.minutes))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     // Create many different pairs to test memory usage
@@ -91,23 +94,34 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
       if from != to
     } yield Rate.Pair(from, to)
     
-    // Request all pairs twice
-    pairs.foreach(service.get(_).unsafeRunSync())
-    pairs.foreach(service.get(_).unsafeRunSync())
-    
-    // First round should make 1 batch API call, second round should be cached
+    // Pre-populate cache using refreshCache
+    service.refreshCache().unsafeRunSync()
     mockClient.batchCallCount shouldBe 1
     
-    // Verify cached pairs are managed efficiently
-    cache.getAllCachedPairs.unsafeRunSync().length shouldBe pairs.length
+    // Reset mock to track subsequent calls
+    mockClient.reset()
+    
+    // Request all pairs twice - should all come from cache
+    pairs.foreach { pair =>
+      service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
+    }
+    pairs.foreach { pair =>
+      service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
+    }
+    
+    // Should make 0 additional API calls (all from cache)
+    mockClient.batchCallCount shouldBe 0
+    
+    // Verify all supported pairs are cached efficiently
+    val supportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }.toSet
+    cache.getAllCachedPairs.unsafeRunSync().toSet shouldBe supportedPairs
   }
   
-  it should "handle rapid cache expiration cycles efficiently" in {
+  it should "handle rapid cache refresh cycles efficiently" in {
     val testClock = new TestClock[IO]
-    implicit val clock = testClock
-    
+
     val mockClient = new MockAlgebra[IO](Some(testClock))
-    val cache = new RateCache[IO](CacheConfig(5.seconds))
+    val cache = new RateCache[IO]()
     val service = createCachedOneFrame(mockClient, cache)
     
     val pairs = List(
@@ -117,27 +131,23 @@ class PerformanceSpec extends AnyFlatSpec with Matchers {
     )
     
     val cycles = 5
-    var totalApiCalls = 0
     
-    (1 to cycles).foreach { cycle =>
-      mockClient.reset()
+    (1 to cycles).foreach { _ =>
+      // Refresh cache - simulates timer-based refresh
+      service.refreshCache().unsafeRunSync()
       
-      // Request all pairs
-      pairs.foreach(service.get(_).unsafeRunSync())
-      
-      if (cycle == 1) {
-        // First cycle: individual calls
-        totalApiCalls += mockClient.callCount
-      } else {
-        // Subsequent cycles: should batch
-        totalApiCalls += mockClient.batchCallCount
+      // Request all pairs - should all come from cache
+      pairs.foreach { pair =>
+        service.get(pair).unsafeRunSync() shouldBe a[Right[_, _]]
       }
-      
-      // Advance time to expire cache
-      testClock.advance(10.seconds)
     }
     
-    // Should use batching efficiently after first cycle
-    totalApiCalls should be <= (pairs.length + cycles - 1)
+    // Should make exactly 5 batch calls (one per refresh cycle)
+    mockClient.batchCallCount shouldBe cycles
+    
+    // Verify all pairs are still cached after multiple refresh cycles
+    pairs.foreach { pair =>
+      cache.get(pair).unsafeRunSync().isDefined shouldBe true
+    }
   }
 }
