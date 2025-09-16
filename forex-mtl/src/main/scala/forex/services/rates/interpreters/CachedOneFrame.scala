@@ -1,6 +1,6 @@
 package forex.services.rates.interpreters
 
-import cats.effect.ConcurrentEffect
+import cats.effect.{ConcurrentEffect, Resource}
 import cats.implicits._
 import forex.config.{OneFrameConfig}
 import forex.domain.{Currency, Rate}
@@ -93,9 +93,10 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
 object CachedOneFrame {
   def apply[F[_]: ConcurrentEffect](
       oneFrameConfig: OneFrameConfig
-  )(implicit ec: ExecutionContext): F[CachedOneFrame[F]] = {
-    val client = OneFrameClient[F](oneFrameConfig)
-    val cache = new RateCache[F]()
-    ConcurrentEffect[F].pure(new CachedOneFrame[F](client, cache))
+  )(implicit ec: ExecutionContext): Resource[F, CachedOneFrame[F]] = {
+    OneFrameClient[F](oneFrameConfig).map { client =>
+      val cache = new RateCache[F]()
+      new CachedOneFrame[F](client, cache)
+    }
   }
 }

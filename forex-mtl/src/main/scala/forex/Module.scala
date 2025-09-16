@@ -10,25 +10,16 @@ import org.http4s._
 import org.http4s.implicits._
 import org.http4s.server.middleware.{AutoSlash, Logger, Timeout}
 import org.slf4j.LoggerFactory
-import scala.concurrent.ExecutionContext
 
-class Module[F[_]: Timer: ConcurrentEffect](config: ApplicationConfig)(implicit ec: ExecutionContext) {
+class Module[F[_]: Timer: ConcurrentEffect](config: ApplicationConfig, cachedOneFrameInstance: CachedOneFrame[F])() {
 
   private val logger = LoggerFactory.getLogger(classOf[Module[F]])
-  private val ratesServiceF: F[RatesService[F]] = RatesServices.cachedOneFrame[F](config.oneFrame)
   
-  // For simplicity, we'll use unsafeRunSync here since Module is initialized once at startup
-  private val ratesService: RatesService[F] = {
-    import cats.effect.IO
-    ratesServiceF.asInstanceOf[IO[RatesService[F]]].unsafeRunSync()
-  }
+  // Use the provided CachedOneFrame instance (created with proper resource management)
+  private val cachedOneFrame = cachedOneFrameInstance
   
-  // Keep reference to CachedOneFrame for force update
-  private val cachedOneFrameF = RatesServices.cachedOneFrame[F](config.oneFrame)
-  private val cachedOneFrame = {
-    import cats.effect.IO
-    cachedOneFrameF.asInstanceOf[IO[CachedOneFrame[F]]].unsafeRunSync()
-  }
+  // Use the same instance as RatesService
+  private val ratesService: RatesService[F] = cachedOneFrame
 
   private val ratesProgram: RatesProgram[F] = RatesProgram[F](ratesService)
 

@@ -20,8 +20,9 @@ A high-performance, thread-safe forex exchange rate service that acts as a local
 ### Core Components
 
 1. **OneFrameClient** - HTTP client for One-Frame API integration
-2. **RateCache** - TTL-based concurrent cache using TrieMap with unified expiration
-3. **CachedOneFrame** - Main service orchestrating cache and API calls
+2. **RateCache** - Atomic concurrent cache using TrieMap with timer-based refresh
+3. **CachedOneFrame** - Main service providing read-only access to cached rates
+4. **Timer-Based Architecture** - Background refresh every 5 minutes via fs2 Stream
 
 ## Meeting One-Frame API Limitations
 
@@ -32,12 +33,12 @@ A high-performance, thread-safe forex exchange rate service that acts as a local
 
 ### Solution Strategy
 
-#### 1. Unified TTL-Based Caching (5 minutes)
+#### 1. Timer-Based Cache Refresh
 ```scala
-// Single expiration time for entire cache
-@volatile private var cacheExpiresAt: Option[Instant] = None
-val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
-cacheExpiresAt = Some(expiresAt)
+// Background timer refreshes cache every CACHE_TTL interval
+cacheUpdater = Stream.awakeEvery[F](config.cache.ttl).evalMap { _ =>
+  module.updateCache()
+}
 ```
 
 #### 2. Complete Batch API Optimization
@@ -47,10 +48,11 @@ val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pa
 client.getBatch(allSupportedPairs)
 ```
 
-#### 3. Unified Cache Management
-- **All-or-Nothing Strategy**: On any cache miss, refresh ALL supported pairs at once
-- **Single TTL**: Entire cache expires together, eliminating partial cache states
+#### 3. Atomic Cache Management
+- **Timer-Based Strategy**: Background timer refreshes ALL supported pairs periodically
+- **Atomic Replacement**: Entire cache replaced atomically to avoid partial states
 - **TrieMap Storage**: Thread-safe concurrent map for high-performance access
+- **Read-Only User Requests**: User requests only read from cache, never trigger API calls
 
 ### Efficiency Analysis
 
@@ -60,42 +62,43 @@ client.getBatch(allSupportedPairs)
 
 **Result**: Comfortably within 1000 API calls/day limit 
 
-## TTL Strategy: Server Time vs API Timestamp
+## Timer-Based Architecture
 
 ### Design Decision
 
-The cache TTL is calculated from **server time** rather than the API's `time_stamp` field. This is a deliberate architectural choice with important implications:
+The cache is refreshed by a **background timer** rather than on-demand during user requests. This architecture provides several key benefits:
 
 ```scala
-// Current implementation - server time based
-val expiresAt = Instant.ofEpochMilli(nowMillis).plusMillis(ttl.toMillis)
+// Timer-based cache refresh in Main.scala
+cacheUpdater = Stream.awakeEvery[F](config.cache.ttl).evalMap { _ =>
+  module.updateCache()
+}
 
-// Alternative approach - API timestamp based
-val expiresAt = apiTimestamp.plusMillis(ttl.toMillis)
+// User requests only read from cache
+def get(pair: Rate.Pair): F[Error Either Rate] = {
+  cache.get(pair).map {
+    case Some(cachedRate) => cachedRate.asRight[Error]
+    case None => (RateNotFound(pairStr): Error).asLeft[Rate]
+  }
+}
 ```
 
-### Trade-off Analysis
+### Architecture Benefits
 
-**Server Time Approach (Current):**
-- ✅ **Predictable API usage**: Exactly 288 calls/day guaranteed
-- ✅ **Quota safety**: Never exceeds One-Frame limits unexpectedly  
-- ✅ **Clock drift resilient**: Independent of API server time synchronization
-- ✅ **Production stable**: System behavior is deterministic
-- ❌ **Theoretical precision loss**: May serve data slightly older than 5 minutes in edge cases
+**Timer-Based Approach:**
+- ✅ **Predictable API usage**: Exactly 288 calls/day guaranteed (every 5 minutes)
+- ✅ **Zero user latency**: User requests never wait for API calls
+- ✅ **Quota safety**: Never exceeds One-Frame limits unexpectedly
+- ✅ **Production stable**: System behavior is deterministic and observable
+- ✅ **Fault isolation**: API failures don't affect user request performance
+- ✅ **Atomic consistency**: Cache always contains complete set or is empty
 
-**API Timestamp Approach (Alternative):**
-- ✅ **Stricter data freshness**: Never serves data older than 5 minutes from source
-- ✅ **Theoretical correctness**: TTL reflects actual data age
-- ❌ **Unpredictable API usage**: 288-1440 calls/day depending on API timestamp delays
-- ❌ **Quota risk**: Could exhaust daily limit if API timestamps are stale
-- ❌ **Clock sync dependency**: Breaks down with time synchronization issues
+### Why Timer-Based Was Chosen
 
-### Why Server Time Was Chosen
-
-1. **Business Constraint Priority**: Meeting the 10,000 requests/day requirement with 1,000 API calls/day limit
-2. **Production Reliability**: Predictable resource consumption over theoretical precision
-3. **System Stability**: Resilience to external service timing variations
-4. **Monitoring Capability**: Time sync warnings provide visibility into any precision trade-offs
+1. **Performance Priority**: Zero latency for user requests - all served from memory
+2. **Resource Predictability**: Fixed API call pattern enables precise quota management
+3. **Fault Tolerance**: API service issues don't cascade to user-facing requests
+4. **Operational Simplicity**: Clear separation between data refresh and user serving layers
 
 ## Reliability & High Availability
 
@@ -131,109 +134,72 @@ Project provides sufficient logging for such issues, including:
 
 Integration with monitoring tools (e.g., Prometheus, Grafana) can provide real-time alerts on these events.
 
-## Thread Safety Implementation
+## Thread Safety & Concurrency
 
-### Current Solution: Double-Checked Locking Pattern
+### Timer-Based Architecture Benefits
+
+The new timer-based architecture provides superior thread safety characteristics:
 
 ```scala
+// User requests are read-only and lock-free
 private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
-  // First check: Read from cache without synchronization
-  cache.get(pair).flatMap {
-    case Some(cachedRate) =>
-      logger.debug(s"Cache HIT (unsynchronized read)")
-      F.pure(cachedRate.asRight[Error])
-    case None =>
-      // Cache miss - need to synchronize and double-check
-      this.synchronized {
-        cache.get(pair).flatMap {
-          case Some(cachedRate) =>
-            // Double-check: Another thread might have populated cache
-            logger.debug(s"Cache HIT (synchronized double-check)")
-            F.pure(cachedRate.asRight[Error])
-          case None =>
-            // Confirmed cache miss - perform API call
-            performBatchAPICall(pair)
-        }
-      }
+  cache.get(pair).map {
+    case Some(cachedRate) => cachedRate.asRight[Error]
+    case None => (RateNotFound(pairStr): Error).asLeft[Rate]
+  }
+}
+
+// Cache updates happen atomically via pointer replacement
+def replaceCache(rates: List[Rate]): F[Unit] = {
+  Sync[F].delay {
+    val newCache = TrieMap[Rate.Pair, Rate]()
+    rates.foreach { rate => newCache.put(rate.pair, rate); () }
+    cache = newCache // Atomic pointer replacement
   }
 }
 ```
 
-**Why This Works**:
-- **Optimized Cache Reads**: Most cache hits avoid synchronization entirely
-- **Race Condition Prevention**: Double-check pattern prevents duplicate API calls
-- **Better Concurrency**: Multiple threads can read from cache simultaneously
-- **API Call Protection**: Only synchronized when cache miss confirmed
+**Architecture Benefits**:
+- **Lock-Free Reads**: User requests never block or wait for synchronization
+- **Atomic Updates**: Cache replacement is atomic via @volatile pointer swap
+- **Zero Contention**: Background timer and user requests don't compete for resources
+- **Maximum Concurrency**: Thousands of concurrent reads without performance degradation
+- **Simplified Reasoning**: No complex locking logic to debug or maintain
 
-### Alternative Thread Safety Approaches
+### Performance Characteristics
 
-#### 1. Simple Synchronized Method
-```scala
-private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
-  this.synchronized {
-    cache.get(pair).flatMap {
-      // Entire cache check + API call logic
-    }
-  }
-}
-```
-- **Pros**: Simple implementation, easy to understand
-- **Cons**: All cache reads are synchronized, lower concurrent performance
-
-#### 2. ReadWriteLock Implementation
-```scala
-private val rwLock = new ReentrantReadWriteLock()
-
-private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
-  // Read lock for cache check
-  rwLock.readLock().lock()
-  try {
-    cache.get(pair) match {
-      case Some(rate) => F.pure(rate.asRight)
-      case None => 
-        // Upgrade to write lock
-        rwLock.readLock().unlock()
-        rwLock.writeLock().lock()
-        try {
-          performAPICallWithDoubleCheck(pair)
-        } finally {
-          rwLock.writeLock().unlock()
-        }
-    }
-  } finally {
-    if (rwLock.readLock().tryLock()) rwLock.readLock().unlock()
-  }
-}
-```
-- **Pros**: Maximum concurrency for reads
-- **Cons**: Complex lock management, potential deadlocks, overkill for our load
-
-### Why Double-Checked Locking Was Chosen
-
-1. **Performance Optimization**: At 10k+ requests/day, optimizing cache reads becomes important
-2. **Concurrency Benefits**: Multiple threads can read from cache without blocking each other
-3. **API Call Protection**: Still prevents race conditions for expensive API calls  
-4. **Balanced Approach**: More complex than simple sync, but significantly better performance
-5. **Production Ready**: Well-known pattern suitable for high-throughput caching scenarios
+**Concurrent Read Performance**:
+- **O(1) Access Time**: Direct HashMap lookup with no synchronization overhead
+- **Linear Scalability**: Performance scales with CPU cores for concurrent reads
+- **Zero Lock Contention**: No blocking between user threads
+- **Predictable Latency**: Sub-millisecond response times guaranteed
 
 ## Cache Implementation Alternatives
 
-### Current Solution: In-Memory TrieMap
+### Current Solution: Atomic TrieMap
 ```scala
-private val cache = TrieMap[Rate.Pair, Rate]()
-@volatile private var cacheExpiresAt: Option[Instant] = None
+@volatile private var cache = TrieMap[Rate.Pair, Rate]()
+
+def replaceCache(rates: List[Rate]): F[Unit] = {
+  Sync[F].delay {
+    val newCache = TrieMap[Rate.Pair, Rate]()
+    rates.foreach { rate => newCache.put(rate.pair, rate); () }
+    cache = newCache // Atomic pointer replacement
+  }
+}
 ```
 
 **Pros**:
 - Simple, lightweight implementation
-- Thread-safe concurrent access
+- Thread-safe concurrent access with atomic updates
 - No external dependencies
 - Perfect for single-instance deployments
+- Lock-free read operations
 
 **Cons**:
-- Memory usage grows with number of currency pairs
-- Data lost on application restart
-- No cache eviction policies beyond TTL
+- Memory usage is bounded by number of supported currency pairs (~70 pairs)
+- Data lost on application restart (mitigated by startup cache population)
+- Timer-based refresh only (no on-demand refresh)
 
 ### Alternative: EhCache Integration
 
@@ -339,8 +305,11 @@ environment:
   - ONEFRAME_URL=http://one-frame:8080/rates?
   - ONEFRAME_TOKEN=10dc303535874aeccc86a8251e6992f5
   - ONEFRAME_TIME_TOLERANCE=30s
-  - CACHE_TTL=5m
+  - CACHE_TTL=5m  # Cache refresh interval (also used as TTL for rate validity)
 ```
+
+#### Configuration Parameters
+- **CACHE_TTL**: Controls both the cache refresh interval (how often the background timer fetches new rates) and the TTL for rate validity. The timer-based cache refresh happens every `CACHE_TTL` duration to ensure fresh data is always available.
 
 ### Docker Deployment
 ```bash

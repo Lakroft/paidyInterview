@@ -25,7 +25,7 @@ final case class OneFrameResponse(
     time_stamp: String
 )
 
-class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig, clientResource: Resource[F, Client[F]])() extends Algebra[F] {
+class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig, client: Client[F]) extends Algebra[F] {
 
   private val logger = LoggerFactory.getLogger(classOf[OneFrameClient[F]])
   
@@ -74,79 +74,77 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig, clientResou
       val uri = Uri.unsafeFromString(uriString)
       
       logInfo(s"Making batch HTTP request for pairs: [$pairsStr]").flatMap { _ =>
-        clientResource.use { client =>
-          val request = Request[F](
-            method = Method.GET,
-            uri = uri,
-            headers = Headers.apply(Header.Raw.apply(name = ci"token", value = config.token))
-          )
+        val request = Request[F](
+          method = Method.GET,
+          uri = uri,
+          headers = Headers.apply(Header.Raw.apply(name = ci"token", value = config.token))
+        )
 
-          client.expect[List[OneFrameResponse]](request).flatMap { responses =>
-            val ratesF = responses.traverse { response =>
-              checkTimeSync(response.time_stamp).as {
-                for {
-                  fromCurrency <- Currency.fromString(response.from)
-                  toCurrency <- Currency.fromString(response.to)
-                } yield Rate(
-                  Rate.Pair(fromCurrency, toCurrency),
-                  Price(response.price),
-                  Timestamp(OffsetDateTime.parse(response.time_stamp))
-                )
-              }
-            }.map(_.flatten)
-            
-            ratesF.flatMap { rates =>
-              val logMessage = if (responses.isEmpty) {
-                Some(s"Empty response from One-Frame for pairs [$pairsStr] - possibly same currency pairs or unsupported pairs")
-              } else if (responses.length < pairs.length) {
-                val returnedPairs = rates.map(r => s"${r.pair.from}${r.pair.to}").mkString(", ")
-                Some(s"Partial response from One-Frame: requested ${pairs.length} pairs [$pairsStr], received ${responses.length} rates [$returnedPairs]")
-              } else {
-                None
-              }
-              
-              val logF = logMessage match {
-                case Some(msg) => logWarn(msg)
-                case None => logDebug(s"Batch request successful: received ${rates.length} rates")
-              }
-              
-              logF.map(_ => rates.asRight[Error])
+        client.expect[List[OneFrameResponse]](request).flatMap { responses =>
+          val ratesF = responses.traverse { response =>
+            checkTimeSync(response.time_stamp).as {
+              for {
+                fromCurrency <- Currency.fromString(response.from)
+                toCurrency <- Currency.fromString(response.to)
+              } yield Rate(
+                Rate.Pair(fromCurrency, toCurrency),
+                Price(response.price),
+                Timestamp(OffsetDateTime.parse(response.time_stamp))
+              )
             }
-          }.handleErrorWith { ex =>
-            val errorMessage = ex.getMessage
-            
-            val (errorF, result) = ex match {
-              case _: java.net.ConnectException =>
-                (logError(s"Connection failed for pairs [$pairsStr]: $errorMessage", ex),
-                 (NetworkError(s"Unable to connect to OneFrame service", Some(ex)): Error).asLeft[List[Rate]])
-              case _: java.net.SocketTimeoutException =>
-                (logError(s"Request timeout for pairs [$pairsStr]: $errorMessage", ex),
-                 (NetworkError(s"Request timeout", Some(ex)): Error).asLeft[List[Rate]])
-              case _ if errorMessage.contains("Forbidden") =>
-                (logError(s"Authentication failed for pairs [$pairsStr]: $errorMessage"),
-                 (AuthenticationError("Invalid or expired token"): Error).asLeft[List[Rate]])
-              case _ if errorMessage.contains("No currency pair provided") =>
-                (logError(s"Invalid request for pairs [$pairsStr]: $errorMessage"),
-                 (InvalidResponse("No currency pair provided in request"): Error).asLeft[List[Rate]])
-              case _ if errorMessage.contains("Invalid Currency Pair") =>
-                (logError(s"Invalid currency pair for pairs [$pairsStr]: $errorMessage"),
-                 (RateNotFound(pairsStr): Error).asLeft[List[Rate]])
-              case _ if errorMessage.contains("Quota reached") =>
-                (logError(s"Rate limit exceeded for pairs [$pairsStr]: $errorMessage"),
-                 (RateLimitExceeded("Daily quota exceeded"): Error).asLeft[List[Rate]])
-              case _ if errorMessage.contains("404") =>
-                (logError(s"Endpoint not found for pairs [$pairsStr]: $errorMessage"),
-                 (ServiceUnavailable("OneFrame service endpoint not found"): Error).asLeft[List[Rate]])
-              case _ if errorMessage.contains("503") =>
-                (logError(s"Service unavailable for pairs [$pairsStr]: $errorMessage"),
-                 (ServiceUnavailable("OneFrame service temporarily unavailable"): Error).asLeft[List[Rate]])
-              case _ =>
-                (logError(s"Batch request failed for pairs [$pairsStr]: $errorMessage", ex),
-                 (NetworkError(s"Request failed: $errorMessage", Some(ex)): Error).asLeft[List[Rate]])
+          }.map(_.flatten)
+          
+          ratesF.flatMap { rates =>
+            val logMessage = if (responses.isEmpty) {
+              Some(s"Empty response from One-Frame for pairs [$pairsStr] - possibly same currency pairs or unsupported pairs")
+            } else if (responses.length < pairs.length) {
+              val returnedPairs = rates.map(r => s"${r.pair.from}${r.pair.to}").mkString(", ")
+              Some(s"Partial response from One-Frame: requested ${pairs.length} pairs [$pairsStr], received ${responses.length} rates [$returnedPairs]")
+            } else {
+              None
             }
             
-            errorF.as(result)
+            val logF = logMessage match {
+              case Some(msg) => logWarn(msg)
+              case None => logDebug(s"Batch request successful: received ${rates.length} rates")
+            }
+            
+            logF.map(_ => rates.asRight[Error])
           }
+        }.handleErrorWith { ex =>
+          val errorMessage = ex.getMessage
+          
+          val (errorF, result) = ex match {
+            case _: java.net.ConnectException =>
+              (logError(s"Connection failed for pairs [$pairsStr]: $errorMessage", ex),
+               (NetworkError(s"Unable to connect to OneFrame service", Some(ex)): Error).asLeft[List[Rate]])
+            case _: java.net.SocketTimeoutException =>
+              (logError(s"Request timeout for pairs [$pairsStr]: $errorMessage", ex),
+               (NetworkError(s"Request timeout", Some(ex)): Error).asLeft[List[Rate]])
+            case _ if errorMessage.contains("Forbidden") =>
+              (logError(s"Authentication failed for pairs [$pairsStr]: $errorMessage"),
+               (AuthenticationError("Invalid or expired token"): Error).asLeft[List[Rate]])
+            case _ if errorMessage.contains("No currency pair provided") =>
+              (logError(s"Invalid request for pairs [$pairsStr]: $errorMessage"),
+               (InvalidResponse("No currency pair provided in request"): Error).asLeft[List[Rate]])
+            case _ if errorMessage.contains("Invalid Currency Pair") =>
+              (logError(s"Invalid currency pair for pairs [$pairsStr]: $errorMessage"),
+               (RateNotFound(pairsStr): Error).asLeft[List[Rate]])
+            case _ if errorMessage.contains("Quota reached") =>
+              (logError(s"Rate limit exceeded for pairs [$pairsStr]: $errorMessage"),
+               (RateLimitExceeded("Daily quota exceeded"): Error).asLeft[List[Rate]])
+            case _ if errorMessage.contains("404") =>
+              (logError(s"Endpoint not found for pairs [$pairsStr]: $errorMessage"),
+               (ServiceUnavailable("OneFrame service endpoint not found"): Error).asLeft[List[Rate]])
+            case _ if errorMessage.contains("503") =>
+              (logError(s"Service unavailable for pairs [$pairsStr]: $errorMessage"),
+               (ServiceUnavailable("OneFrame service temporarily unavailable"): Error).asLeft[List[Rate]])
+            case _ =>
+              (logError(s"Batch request failed for pairs [$pairsStr]: $errorMessage", ex),
+               (NetworkError(s"Request failed: $errorMessage", Some(ex)): Error).asLeft[List[Rate]])
+          }
+          
+          errorF.as(result)
         }
       }
     }
@@ -169,8 +167,9 @@ class OneFrameClient[F[_]: ConcurrentEffect](config: OneFrameConfig, clientResou
 }
 
 object OneFrameClient {
-  def apply[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec: ExecutionContext): OneFrameClient[F] = {
-    val clientResource = BlazeClientBuilder[F](ec).resource
-    new OneFrameClient[F](config, clientResource)()
+  def apply[F[_]: ConcurrentEffect](config: OneFrameConfig)(implicit ec: ExecutionContext): Resource[F, OneFrameClient[F]] = {
+    BlazeClientBuilder[F](ec).resource.map { client =>
+      new OneFrameClient[F](config, client)
+    }
   }
 }
