@@ -31,22 +31,21 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
   override def get(pair: Rate.Pair): F[Error Either Rate] = {
     validateCurrencyPair(pair) match {
       case Left(error) =>
-        logger.warn(s"Invalid currency pair validation failed: ${error.message}")
-        ConcurrentEffect[F].pure(error.asLeft[Rate])
+        ConcurrentEffect[F].delay(logger.warn(s"Invalid currency pair validation failed: ${error.message}")).flatMap { _ =>
+          ConcurrentEffect[F].pure(error.asLeft[Rate])
+        }
       case Right(validPair) =>
         getCurrencyRate(validPair)
     }
   }
 
   private def getCurrencyRate(pair: Rate.Pair): F[Error Either Rate] = {
-    cache.get(pair).map {
+    cache.get(pair).flatMap {
       case Some(cachedRate) =>
-        logger.debug(s"Cache HIT for ${pair.from}${pair.to}")
-        cachedRate.asRight[Error]
+        ConcurrentEffect[F].delay(logger.debug(s"Cache HIT for ${pair.from}${pair.to}")).as(cachedRate.asRight[Error])
       case None =>
         val pairStr = s"${pair.from}${pair.to}"
-        logger.debug(s"Cache MISS for $pairStr - data will be available after timer update")
-        (RateNotFound(pairStr): Error).asLeft[Rate]
+        ConcurrentEffect[F].delay(logger.debug(s"Cache MISS for $pairStr - data will be available after timer update")).as((RateNotFound(pairStr): Error).asLeft[Rate])
     }
   }
 
@@ -77,14 +76,15 @@ class CachedOneFrame[F[_]: ConcurrentEffect](
   // Method to refresh cache by fetching fresh data from API and atomically replacing cache
   def refreshCache(): F[Error Either List[Rate]] = {
     val allSupportedPairs = Currency.supportedPairs.map { case (from, to) => Rate.Pair(from, to) }
-    logger.info(s"Refreshing cache with fresh data for ${allSupportedPairs.length} pairs")
-    
-    client.getBatch(allSupportedPairs).flatMap {
-      case Right(rates) =>
-        cache.replaceCache(rates).map(_ => rates.asRight[Error])
-      case Left(error) =>
-        logger.error(s"Failed to refresh cache: ${error.message}")
-        ConcurrentEffect[F].pure(error.asLeft[List[Rate]])
+    ConcurrentEffect[F].delay(logger.info(s"Refreshing cache with fresh data for ${allSupportedPairs.length} pairs")).flatMap { _ =>
+      client.getBatch(allSupportedPairs).flatMap {
+        case Right(rates) =>
+          cache.replaceCache(rates).map(_ => rates.asRight[Error])
+        case Left(error) =>
+          ConcurrentEffect[F].delay(logger.error(s"Failed to refresh cache: ${error.message}")).flatMap { _ =>
+            ConcurrentEffect[F].pure(error.asLeft[List[Rate]])
+          }
+      }
     }
   }
 

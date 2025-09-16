@@ -1,6 +1,7 @@
 package forex.services.rates
 
 import cats.effect.Sync
+import cats.implicits._
 import forex.domain.Rate
 import org.slf4j.LoggerFactory
 import scala.collection.concurrent.TrieMap
@@ -13,13 +14,7 @@ class RateCache[F[_]: Sync]() {
 
   def get(pair: Rate.Pair): F[Option[Rate]] = {
     Sync[F].delay {
-      cache.get(pair) match {
-        case Some(rate) =>
-          logger.info(s"Cache HIT for ${pair.from}${pair.to}")
-          Some(rate)
-        case None =>
-          None
-      }
+      cache.get(pair)
     }
   }
 
@@ -40,18 +35,19 @@ class RateCache[F[_]: Sync]() {
   
   // Atomic cache replacement - prepare new cache and replace pointer
   def replaceCache(rates: List[Rate]): F[Unit] = {
-    Sync[F].delay {
-      // Prepare new cache with fresh data
-      val newCache = TrieMap[Rate.Pair, Rate]()
-      rates.foreach { rate =>
-        newCache.put(rate.pair, rate)
-        ()
+    for {
+      _ <- Sync[F].delay {
+        // Prepare new cache with fresh data
+        val newCache = TrieMap[Rate.Pair, Rate]()
+        rates.foreach { rate =>
+          newCache.put(rate.pair, rate)
+          ()
+        }
+        
+        // Atomic replacement - just change the pointer
+        cache = newCache
       }
-      
-      // Atomic replacement - just change the pointer
-      cache = newCache
-      
-      logger.info(s"Cache atomically replaced with ${rates.length} fresh rates")
-    }
+      _ <- Sync[F].delay(logger.info(s"Cache atomically replaced with ${rates.length} fresh rates"))
+    } yield ()
   }
 }

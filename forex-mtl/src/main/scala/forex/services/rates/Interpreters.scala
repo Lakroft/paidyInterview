@@ -10,9 +10,4 @@ object Interpreters {
       oneFrameConfig: OneFrameConfig
   )(implicit ec: ExecutionContext): Resource[F, CachedOneFrame[F]] =
     CachedOneFrame[F](oneFrameConfig)
-    
-  def cachedOneFrameAlgebra[F[_]: ConcurrentEffect](
-      oneFrameConfig: OneFrameConfig
-  )(implicit ec: ExecutionContext): Resource[F, Algebra[F]] =
-    CachedOneFrame[F](oneFrameConfig).map(identity[Algebra[F]])
 }
